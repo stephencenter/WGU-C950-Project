@@ -1,6 +1,7 @@
 # Stephen Center ID#001168251
 
 import csv
+import datetime
 
 class Package:
     def __init__(self, pkg_id, address, city, state, zipcode, deadline, mass):
@@ -42,8 +43,7 @@ class HashMap:
                 return kvp[1];
                 
         raise KeyError(f"Key '{key}' not found in HashMap")
-  
-  
+   
 class DeliveryRoute:
     def __init__(self, package_order, distance_list):
         self.package_order = package_order
@@ -53,8 +53,10 @@ class Truck:
     def __init__(self, name, route):
         self.name = name
         self.route = route
-        self.distance_traveled = 0
         self.speed = 18
+        self.departure_time = None
+        self.distance_traveled = 0
+        self.time_finished = 0
     
     def calculate_package_statuses(self, package_map):
         total_necessary = 0
@@ -70,14 +72,42 @@ class Truck:
                 
             else:
                 the_package.delivery_status = 2
+                the_package.delivery_time = total_necessary/self.speed
+                
+                print(f"Package #{the_package.package_id} delivered at {round(the_package.delivery_time, 1)} hours")
             
     def is_route_finished(self):
         return not (self.distance_traveled < sum(self.route.distance_list))
         
     def calculate_distance_traveled(self, hours_passed):
+        if self.departure_time is None:
+            return
+            
         total_necessary = sum(self.route.distance_list)
-        self.distance_traveled = min(total_necessary, self.speed*hours_passed)
+        self.distance_traveled = max(0, min(total_necessary, self.speed*(hours_passed - self.departure_time)))
+        self.distance_traveled = round(self.distance_traveled, 1)
     
+    def calculate_time_finished(self):
+        if self.departure_time is None:
+            return
+        self.time_finished = self.distance_traveled/self.speed + self.departure_time
+        
+    def get_total_delivered(self, package_map):
+        total = 0
+        for pkg_id in self.route.package_order:
+            the_package = package_map.get_val(pkg_id)
+            if the_package.delivery_status == 2:
+                total += 1
+        
+        return total
+        
+    def print_status(self, package_map):
+        total_delivered = self.get_total_delivered(package_map)
+        total_packages = len(self.route.package_order)
+        
+        distance_required = round(sum(self.route.distance_list), 1)
+        print(f"{self.name}: {self.distance_traveled} out of {distance_required} miles traveled, {total_delivered} out of {total_packages} packages delivered")
+        
 def load_distance_data():
     distances_path = "distances.csv"
 
@@ -213,50 +243,71 @@ def simulate_deliveries(package_map, distance_map, hours_passed):
     
     # Truck A leaves immediately, so its distance traveled is simply
     # the speed of the truck times how much time has passed
+    truck_a.departure_time = 0
     truck_a.calculate_distance_traveled(hours_passed)
+    truck_a.calculate_time_finished()
     
     # Truck B waits until 9:05am to leave so it can pick up the delayed 
     # packages. Its distance traveled is the speed of the truck multiplied by
     # time passed, minus how time spent waiting at the hub before leaving
-    truck_b_departure_time = (1 + 5/60)
-    if hours_passed > truck_b_departure_time:
-        truck_b.calculate_distance_traveled(hours_passed - truck_b_departure_time)
+    truck_b.departure_time = 1 + 5/60
+    truck_b.calculate_distance_traveled(hours_passed)
+    truck_b.calculate_time_finished()
         
     # Truck C doesn't leave until either Truck A or Truck B have returned, as
     # we only have two drivers. So Truck C isn't really a different truck,
     # it's simply the third batch of packages that will be picked up by either
     # truck A or truck B. This is also helpful because one of the packages on
     # truck C doesn't arrive until 10:20am, so it would need delayed anyway
-    truck_a_time_spent = truck_a.distance_traveled/truck_a.speed
-    truck_b_time_spent = truck_b.distance_traveled/truck_b.speed
     if truck_a.is_route_finished() and truck_b.is_route_finished():
-        
-        if truck_a_time_spent < truck_b_time_spent:
-            truck_c.calculate_distance_traveled(hours_passed - truck_a_time_spent)
+        if truck_a.time_finished < truck_b.time_finished: 
+            truck_c.departure_time = truck_a.time_finished
         else:
-            truck_c.calculate_distance_traveled(hours_passed - truck_b_time_spent)
-        
+            truck_c.departure_time = truck_b.time_finished
     
     elif truck_a.is_route_finished():
-        truck_c.calculate_distance_traveled(hours_passed - truck_a_time_spent)
+        truck_c.departure_time = truck_a.time_finished
         
     elif truck_b.is_route_finished():
-        truck_c.calculate_distance_traveled(hours_passed - truck_b_time_spent)
+        truck_c.departure_time = truck_b.time_finished 
         
-    truck_c_time_spent = truck_c.distance_traveled/truck_c.speed
+    truck_c.calculate_distance_traveled(hours_passed)
+    truck_c.calculate_time_finished()
     
     truck_a.calculate_package_statuses(package_map)
     truck_b.calculate_package_statuses(package_map)
     truck_c.calculate_package_statuses(package_map)
+    
+    total_delivered = 0
+    for truck in [truck_a, truck_b, truck_c]:
+        truck.print_status(package_map)
+        total_delivered += truck.get_total_delivered(package_map)
+        
+    total_packages = len(packages_a) + len(packages_b) + len(packages_c)
     total_traveled = truck_a.distance_traveled + truck_b.distance_traveled + truck_c.distance_traveled
-    total_time_spent = truck_c_time_spent + min(truck_a_time_spent, truck_b_time_spent)
+    total_necessary = sum(truck_a.route.distance_list) + sum(truck_b.route.distance_list) + sum(truck_c.route.distance_list)
+    total_time = max(truck_a.time_finished, truck_b.time_finished, truck_c.time_finished)
     
-    print(f"Truck A: {truck_a.distance_traveled} out of {sum(truck_a.route.distance_list)}")
-    print(f"Truck B: {truck_b.distance_traveled} out of {sum(truck_b.route.distance_list)}")
-    print(f"Truck C: {truck_c.distance_traveled} out of {sum(truck_c.route.distance_list)}")
-    print(f"{total_time_spent} hours spent, {total_traveled} miles traveled")
+    print(f"{total_time} hours spent, {total_delivered} out of {total_packages} delivered, {total_traveled} out of {total_necessary} traveled")
     
-    
+def get_simulation_time():
+    while True:
+        print("The day starts at 8:00 AM")
+        
+        while True:
+            chosen_time = input("Enter a time to calculate: ").lower().strip()
+            
+            try:
+                chosen_time = datetime.datetime.strptime(chosen_time, "%I:%M %p")
+                
+            except ValueError:
+                print("Please ensure your time is in the format 'hh:mm AM/PM'")
+                continue
+                
+            hours_passed = chosen_time.hour + (chosen_time.minute/60) - 8
+            
+            return max(0, hours_passed)
+
 def main():
     distance_data = load_distance_data()
     distance_map = create_distance_hashmap(distance_data)
@@ -264,6 +315,8 @@ def main():
     package_data = load_package_data()
     package_map = create_package_hashmap(package_data)
     
-    simulate_deliveries(package_map, distance_map, 100)
+    while True:
+        hours_passed = get_simulation_time()
+        simulate_deliveries(package_map, distance_map, hours_passed)
     
 main()
