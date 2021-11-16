@@ -2,6 +2,7 @@
 
 import csv
 import datetime
+import math
 
 class Package:
     def __init__(self, pkg_id, address, city, state, zipcode, deadline, mass):
@@ -14,6 +15,16 @@ class Package:
         self.mass = mass
         self.delivery_status = 0
         self.delivery_time = None
+        
+    def get_status(self):
+        if self.delivery_status == 0:
+            return "At the hub"
+        
+        if self.delivery_status == 1:
+            return "En route"
+            
+        if self.delivery_status == 2:
+            return f"Delivered at {float_time(self.delivery_time)}"
     
 class HashMap:
     def __init__(self, size):
@@ -50,64 +61,67 @@ class DeliveryRoute:
         self.distance_list = distance_list
     
 class Truck:
-    def __init__(self, name, route):
-        self.name = name
+    def __init__(self, route, departure_time, num_hours):
         self.route = route
+        self.departure_time = departure_time
+        self.num_hours = num_hours
         self.speed = 18
-        self.departure_time = None
-        self.distance_traveled = 0
-        self.time_finished = 0
-    
-    def calculate_package_statuses(self, package_map):
-        total_necessary = 0
+        
+    def run_simulation(self, package_map):
+        route_length = sum(self.route.distance_list)
+        
+        if self.departure_time is not None:
+            distance_traveled = max(0, min(route_length, self.speed*(self.num_hours - self.departure_time)))
+            distance_traveled = round(distance_traveled, 1)
+            time_ended = min(route_length/self.speed, self.num_hours)
+        
+        else:
+            distance_traveled = 0
+            time_ended = 0
+        
+        miles_necessary = 0
         for index, pkg_id in enumerate(self.route.package_order):
-            total_necessary += self.route.distance_list[index]
+            miles_necessary += self.route.distance_list[index]
             the_package = package_map.get_val(pkg_id)
             
-            if self.distance_traveled == 0:
+            if distance_traveled == 0:
                 the_package.delivery_status = 0
                 
-            elif self.distance_traveled < total_necessary:
+            elif distance_traveled < miles_necessary:
                 the_package.delivery_status = 1
                 
             else:
                 the_package.delivery_status = 2
-                the_package.delivery_time = total_necessary/self.speed
-                
-                print(f"Package #{the_package.package_id} delivered at {round(the_package.delivery_time, 1)} hours")
-            
-    def is_route_finished(self):
-        return not (self.distance_traveled < sum(self.route.distance_list))
+                the_package.delivery_time = miles_necessary/self.speed + self.departure_time                
         
-    def calculate_distance_traveled(self, hours_passed):
-        if self.departure_time is None:
-            return
-            
-        total_necessary = sum(self.route.distance_list)
-        self.distance_traveled = max(0, min(total_necessary, self.speed*(hours_passed - self.departure_time)))
-        self.distance_traveled = round(self.distance_traveled, 1)
-    
-    def calculate_time_finished(self):
-        if self.departure_time is None:
-            return
-        self.time_finished = self.distance_traveled/self.speed + self.departure_time
+        if distance_traveled < route_length:
+            was_route_completed = False
+        else:
+            was_route_completed = True
         
-    def get_total_delivered(self, package_map):
-        total = 0
+        total_delivered = 0
         for pkg_id in self.route.package_order:
             the_package = package_map.get_val(pkg_id)
             if the_package.delivery_status == 2:
-                total += 1
+                total_delivered += 1
         
-        return total
-        
-    def print_status(self, package_map):
-        total_delivered = self.get_total_delivered(package_map)
-        total_packages = len(self.route.package_order)
-        
-        distance_required = round(sum(self.route.distance_list), 1)
-        print(f"{self.name}: {self.distance_traveled} out of {distance_required} miles traveled, {total_delivered} out of {total_packages} packages delivered")
-        
+        return SimulationResult(distance_traveled, time_ended, was_route_completed, total_delivered)
+   
+class SimulationResult:
+    def __init__(self, distance_traveled, time_ended, was_route_completed, total_delivered):
+        self.distance_traveled = distance_traveled
+        self.time_ended = time_ended
+        self.was_route_completed = was_route_completed
+        self.total_delivered = total_delivered
+    
+def float_time(float_time):
+    hours = 8 + math.floor(float_time)
+    minutes = int((float_time % 1)*60)
+    
+    h24_string = datetime.datetime.strptime(f"{hours}:{minutes}", "%H:%M")
+    h12_string = h24_string.strftime("%I:%M%p")
+    return h12_string
+                    
 def load_distance_data():
     distances_path = "distances.csv"
 
@@ -232,81 +246,96 @@ def get_distance_from_hub(package_map, distance_map, pkg):
     address = package_map.get_val(pkg).address
     return get_address_distance(distance_map, "HUB", address)
     
-def simulate_deliveries(package_map, distance_map, hours_passed):
+def simulate_deliveries(package_map, distance_map, num_hours, chosen_pkg):
     packages_a = [1, 8, 12, 13, 14, 15, 16, 19, 20, 21, 29, 30, 31, 34, 40]
     packages_b = [3, 4, 6, 11, 17, 18, 22, 23, 24, 25, 26, 32, 36, 37, 38]
-    packages_c = [2, 5, 7, 9, 10, 19, 27, 28, 33, 39]
+    packages_c = [2, 5, 7, 9, 10, 27, 28, 33, 35, 39]
     
-    truck_a = Truck("Truck A", greedy_algorithm(package_map, distance_map, packages_a))
-    truck_b = Truck("Truck B", greedy_algorithm(package_map, distance_map, packages_b))
-    truck_c = Truck("Truck C", greedy_algorithm(package_map, distance_map, packages_c))
+    all_packages = sorted(packages_a + packages_b + packages_c)
     
-    # Truck A leaves immediately, so its distance traveled is simply
-    # the speed of the truck times how much time has passed
-    truck_a.departure_time = 0
-    truck_a.calculate_distance_traveled(hours_passed)
-    truck_a.calculate_time_finished()
+    truck_a = Truck(greedy_algorithm(package_map, distance_map, packages_a), 0, num_hours)
+    simulation_a = truck_a.run_simulation(package_map)
     
-    # Truck B waits until 9:05am to leave so it can pick up the delayed 
-    # packages. Its distance traveled is the speed of the truck multiplied by
-    # time passed, minus how time spent waiting at the hub before leaving
-    truck_b.departure_time = 1 + 5/60
-    truck_b.calculate_distance_traveled(hours_passed)
-    truck_b.calculate_time_finished()
-        
-    # Truck C doesn't leave until either Truck A or Truck B have returned, as
-    # we only have two drivers. So Truck C isn't really a different truck,
-    # it's simply the third batch of packages that will be picked up by either
-    # truck A or truck B. This is also helpful because one of the packages on
-    # truck C doesn't arrive until 10:20am, so it would need delayed anyway
-    if truck_a.is_route_finished() and truck_b.is_route_finished():
-        if truck_a.time_finished < truck_b.time_finished: 
-            truck_c.departure_time = truck_a.time_finished
+    truck_b = Truck(greedy_algorithm(package_map, distance_map, packages_b), 1 + 5/60, num_hours)
+    simulation_b = truck_b.run_simulation(package_map)
+    
+    truck_c_departure_time = None
+    if simulation_a.was_route_completed and simulation_b.was_route_completed:
+        if simulation_a.time_ended < simulation_b.time_ended: 
+            truck_c_departure_time = simulation_a.time_ended
         else:
-            truck_c.departure_time = truck_b.time_finished
+            truck_c_departure_time = simulation_b.time_ended
     
-    elif truck_a.is_route_finished():
-        truck_c.departure_time = truck_a.time_finished
+    elif simulation_a.was_route_completed:
+        truck_c_departure_time = simulation_a.time_ended
         
-    elif truck_b.is_route_finished():
-        truck_c.departure_time = truck_b.time_finished 
+    elif simulation_b.was_route_completed:
+        truck_c_departure_time = simulation_b.time_ended
         
-    truck_c.calculate_distance_traveled(hours_passed)
-    truck_c.calculate_time_finished()
-    
-    truck_a.calculate_package_statuses(package_map)
-    truck_b.calculate_package_statuses(package_map)
-    truck_c.calculate_package_statuses(package_map)
+    truck_c = Truck(greedy_algorithm(package_map, distance_map, packages_c), truck_c_departure_time, num_hours)
+    simulation_c = truck_c.run_simulation(package_map)
     
     total_delivered = 0
-    for truck in [truck_a, truck_b, truck_c]:
-        truck.print_status(package_map)
-        total_delivered += truck.get_total_delivered(package_map)
+    for truck in [simulation_a, simulation_b, simulation_c]:
+        total_delivered += truck.total_delivered
         
-    total_packages = len(packages_a) + len(packages_b) + len(packages_c)
-    total_traveled = truck_a.distance_traveled + truck_b.distance_traveled + truck_c.distance_traveled
-    total_necessary = sum(truck_a.route.distance_list) + sum(truck_b.route.distance_list) + sum(truck_c.route.distance_list)
-    total_time = max(truck_a.time_finished, truck_b.time_finished, truck_c.time_finished)
+    total_traveled = round(simulation_a.distance_traveled + simulation_b.distance_traveled + simulation_c.distance_traveled, 1)
+    total_required = round(sum(truck_a.route.distance_list) + sum(truck_b.route.distance_list) + sum(truck_c.route.distance_list), 1)
+    total_time = round(max(simulation_a.time_ended, simulation_b.time_ended, simulation_c.time_ended), 2)
     
-    print(f"{total_time} hours spent, {total_delivered} out of {total_packages} delivered, {total_traveled} out of {total_necessary} traveled")
+    if chosen_pkg is not None:
+        the_package = package_map.get_val(chosen_pkg)
+        print(f"Package #{chosen_pkg}: {the_package.get_status()}")
+        
+    else:
+        for pkg_id in all_packages:
+            the_package = package_map.get_val(pkg_id)
+            print(f"Package #{pkg_id}: {the_package.get_status()}")
+            
+    print(f"Overview at {float_time(num_hours)}: {total_delivered} out of {len(all_packages)} packages delivered, {total_traveled} out of {total_required} miles traveled")
     
-def get_simulation_time():
+def get_simulation_input():
+    package_list = [x for x in range(1, 41)]
     while True:
-        print("The day starts at 8:00 AM")
+        print("The day starts at 8:00AM, there are 40 packages")
+        print("Leave package# blank to view all packages")
         
         while True:
-            chosen_time = input("Enter a time to calculate: ").lower().strip()
+            chosen = input("Enter a time and a package# to view information: ").lower().split()
             
+            # Parse the chosen time from the inputted string
             try:
-                chosen_time = datetime.datetime.strptime(chosen_time, "%I:%M %p")
+                chosen_time = chosen[0]
+                
+            except IndexError:
+                print("Please provide a time to get information at")
+                continue
+                
+            try:
+                chosen_time = datetime.datetime.strptime(chosen_time, "%I:%M%p")
                 
             except ValueError:
-                print("Please ensure your time is in the format 'hh:mm AM/PM'")
+                print("Please ensure your time is in the format 'hh:mmAM' or 'hh:mmPM'")
+                continue
+            
+            # Parse the package id from the inputted string
+            try:
+                chosen_pkg = chosen[1]
+                chosen_pkg = int(chosen_pkg)
+                
+                if chosen_pkg not in package_list:
+                    raise ValueError
+                
+            except IndexError:
+                chosen_pkg = None
+                
+            except ValueError:
+                print("Please ensure package# is a number between 1 and 40")
                 continue
                 
             hours_passed = chosen_time.hour + (chosen_time.minute/60) - 8
             
-            return max(0, hours_passed)
+            return max(0, hours_passed), chosen_pkg
 
 def main():
     distance_data = load_distance_data()
@@ -316,7 +345,8 @@ def main():
     package_map = create_package_hashmap(package_data)
     
     while True:
-        hours_passed = get_simulation_time()
-        simulate_deliveries(package_map, distance_map, hours_passed)
+        hours_passed, chosen_pkg = get_simulation_input()
+        simulate_deliveries(package_map, distance_map, hours_passed, chosen_pkg)
+        print("-"*25)
     
 main()
