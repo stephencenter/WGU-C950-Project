@@ -27,9 +27,10 @@ class Package:
             return f"Delivered at {float_time(self.delivery_time)}"
     
 class HashMap:
-    def __init__(self, size):
-        self.size = size
-        self.bucket_list = [[] for _ in range(size)]
+    def __init__(self):
+        self.size = 1
+        self.num_items = 0
+        self.bucket_list = [[]]
         
     def has_key(self, key):
         hashed_key = hash(key) % self.size
@@ -42,6 +43,11 @@ class HashMap:
         return False
         
     def insert_val(self, key, value):
+        self.num_items += 1
+        
+        if self.num_items > self.size:
+            self.resize()
+        
         hashed_key = hash(key) % self.size
         self.bucket_list[hashed_key].append((key, value))
         
@@ -54,12 +60,33 @@ class HashMap:
                 return kvp[1];
                 
         raise KeyError(f"Key '{key}' not found in HashMap")
-   
-class DeliveryRoute:
-    def __init__(self, package_order, distance_list):
-        self.package_order = package_order
-        self.distance_list = distance_list
-    
+        
+    def delete_val(self, key):
+        self.num_items -= 1
+        
+        hashed_key = hash(key) % self.size        
+        bucket = self.bucket_list[hashed_key]
+        self.bucket_list[hashed_key] = [kvp for kvp in bucket if kvp[0] != key]
+            
+        if self.num_items < self.size/2:
+            self.resize()
+        
+    def resize(self):
+        # This code finds the smallest power of 2 that is larger than the
+        # number of items in hashmap (e.g. 16 for 13 items, 8 for 7 items etc)
+        self.size = 2**math.ceil(math.log2(self.num_items))
+        
+        # Create a new list of buckets
+        new_buckets = [[] for _ in range(self.size)]
+        
+        # Iterate through each bucket 
+        for bucket in self.bucket_list:
+            for kvp in bucket:
+                hashed_key = hash(kvp[0]) % self.size
+                new_buckets[hashed_key].append(kvp)
+                
+        self.bucket_list = new_buckets
+
 class Truck:
     def __init__(self, route, departure_time, num_hours):
         self.route = route
@@ -106,7 +133,12 @@ class Truck:
                 total_delivered += 1
         
         return SimulationResult(distance_traveled, time_ended, was_route_completed, total_delivered)
-   
+     
+class DeliveryRoute:
+    def __init__(self, package_order, distance_list):
+        self.package_order = package_order
+        self.distance_list = distance_list
+     
 class SimulationResult:
     def __init__(self, distance_traveled, time_ended, was_route_completed, total_delivered):
         self.distance_traveled = distance_traveled
@@ -136,7 +168,7 @@ def load_package_data():
     
 def create_distance_hashmap(distance_data):
     num_locations = len(distance_data[0]) - 1
-    distance_map = HashMap(num_locations)
+    distance_map = HashMap()
     
     for num, point_a in enumerate(distance_data[0]):
         if point_a == '':
@@ -151,19 +183,19 @@ def create_distance_hashmap(distance_data):
             distance = float(row[num])
             
             if not distance_map.has_key(point_a):
-                distance_map.insert_val(point_a, HashMap(num_locations))
+                distance_map.insert_val(point_a, HashMap())
             
             distance_map.get_val(point_a).insert_val(point_b, distance)
             
             if not distance_map.has_key(point_b):
-                distance_map.insert_val(point_b, HashMap(num_locations))
+                distance_map.insert_val(point_b, HashMap())
                 
             distance_map.get_val(point_b).insert_val(point_a, distance)
     
     return distance_map
             
 def create_package_hashmap(package_data):
-    package_map = HashMap(len(package_data))
+    package_map = HashMap()
     
     for values in package_data:
         key = int(values[0])
