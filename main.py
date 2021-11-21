@@ -4,6 +4,7 @@ import csv
 import datetime
 import math
 
+# The Package class represents the packages being delivered on the trucks
 class Package:
     def __init__(self, pkg_id, address, city, state, zipcode, deadline, mass):
         self.package_id = pkg_id
@@ -16,6 +17,9 @@ class Package:
         self.delivery_status = 0
         self.delivery_time = None
         
+    # This method reads the current delivery status ID (0, 1, or 2) and returns
+    # a string explaining the status
+    # Big O: O(1)
     def get_status(self):
         if self.delivery_status == 0:
             return "At the hub"
@@ -26,12 +30,17 @@ class Package:
         if self.delivery_status == 2:
             return f"Delivered at {float_time(self.delivery_time)}"
     
+# The HashMap class is used to store the package objects, as well as the
+# distances between addresses
 class HashMap:
     def __init__(self):
         self.size = 1
         self.num_items = 0
         self.bucket_list = [[]]
         
+    # This method returns true if it has a value for the provided key, false
+    # otherwise
+    # Big O: O(1)
     def has_key(self, key):
         hashed_key = hash(key) % self.size
         bucket = self.bucket_list[hashed_key]
@@ -42,15 +51,28 @@ class HashMap:
                 
         return False
         
+    # This method inserts a new key-value pair into the hashtable
+    # Big O: O(1), O(n^2) if resizing
     def insert_val(self, key, value):
+        hashed_key = hash(key) % self.size
+        
+        # If the provided key already exists in the hashmap then we'll
+        # overwrite its value with the new value
+        for index, kvp in enumerate(self.bucket_list[hashed_key]):
+            if kvp[0] == key:
+                self.bucket_list[hashed_key][index] = (key, value)
+                return
+            
         self.num_items += 1
         
         if self.num_items > self.size:
             self.resize()
+            hashed_key = hash(key) % self.size
         
-        hashed_key = hash(key) % self.size
         self.bucket_list[hashed_key].append((key, value))
         
+    # This method returns the value corresponding to the provided key
+    # Big O: O(1)
     def get_val(self, key):
         hashed_key = hash(key) % self.size
         bucket = self.bucket_list[hashed_key]
@@ -61,30 +83,39 @@ class HashMap:
                 
         raise KeyError(f"Key '{key}' not found in HashMap")
         
+    # This method deletes the key-value pair with the matching key
+    # Big O: O(1), O(n^2) if resizing
     def delete_val(self, key):
-        self.num_items -= 1
+        if not self.has_key(key):
+            raise KeyError(f"Key '{key}' not found in HashMap")
         
         hashed_key = hash(key) % self.size        
         bucket = self.bucket_list[hashed_key]
         self.bucket_list[hashed_key] = [kvp for kvp in bucket if kvp[0] != key]
             
+        self.num_items -= 1
         if self.num_items < self.size/2:
             self.resize()
         
+    # This method is called when it's necessary to resize the hash map.
+    # It sets the number of buckets equal to the smallest power of 2 larger
+    # than the number of items in the table
+    # Big O: O(n^2)
     def resize(self):
-        # This code finds the smallest power of 2 that is larger than the
+        # Calculate the smallest power of 2 that is larger than the
         # number of items in hashmap (e.g. 16 for 13 items, 8 for 7 items etc)
         self.size = 2**math.ceil(math.log2(self.num_items))
         
         # Create a new list of buckets
         new_buckets = [[] for _ in range(self.size)]
         
-        # Iterate through each bucket 
+        # Assign new hashes to each of the items in the old bucket list
         for bucket in self.bucket_list:
             for kvp in bucket:
                 hashed_key = hash(kvp[0]) % self.size
                 new_buckets[hashed_key].append(kvp)
                 
+        # Replace the old bucket list with the new resized one
         self.bucket_list = new_buckets
 
 class Truck:
@@ -147,6 +178,7 @@ class SimulationResult:
         self.total_delivered = total_delivered
     
 def float_time(float_time):
+    # This method 
     hours = 8 + math.floor(float_time)
     minutes = int((float_time % 1)*60)
     
@@ -167,29 +199,26 @@ def load_package_data():
         return [x for x in csv.reader(f)][1:]
     
 def create_distance_hashmap(distance_data):
-    num_locations = len(distance_data[0]) - 1
     distance_map = HashMap()
     
-    for num, point_a in enumerate(distance_data[0]):
-        if point_a == '':
+    for address in distance_data[0]:
+        if not address:
+            continue
+        
+        distance_map.insert_val(address, HashMap())
+    
+    for index, point_a in enumerate(distance_data[0]):
+        if not point_a:
             continue
             
         for row in distance_data:
             point_b = row[0]
             
-            if point_b == '' or row[num] == '':
+            if not point_b or not row[index]:
                 continue
                 
-            distance = float(row[num])
-            
-            if not distance_map.has_key(point_a):
-                distance_map.insert_val(point_a, HashMap())
-            
-            distance_map.get_val(point_a).insert_val(point_b, distance)
-            
-            if not distance_map.has_key(point_b):
-                distance_map.insert_val(point_b, HashMap())
-                
+            distance = float(row[index])
+            distance_map.get_val(point_a).insert_val(point_b, distance)                
             distance_map.get_val(point_b).insert_val(point_a, distance)
     
     return distance_map
