@@ -4,43 +4,17 @@ import csv
 import datetime
 import math
 
-# The Package class represents the packages being delivered on the trucks
-class Package:
-    def __init__(self, pkg_id, address, city, state, zipcode, deadline, mass):
-        self.package_id = pkg_id
-        self.address = address
-        self.city = city
-        self.state = state
-        self.zipcode = zipcode
-        self.deadline = deadline
-        self.mass = mass
-        self.delivery_status = 0
-        self.delivery_time = None
-        
-    # This method reads the current delivery status ID (0, 1, or 2) and returns
-    # a string explaining the status
-    # Big O: O(1)
-    def get_status(self):
-        if self.delivery_status == 0:
-            return "At the hub"
-        
-        if self.delivery_status == 1:
-            return "En route"
-            
-        if self.delivery_status == 2:
-            return f"Delivered at {float_time(self.delivery_time)}"
-    
 # The HashMap class is used to store the package objects, as well as the
 # distances between addresses
 class HashMap:
-    def __init__(self):
-        self.size = 1
+    def __init__(self, initial_size):
+        self.size = 2**math.ceil(math.log2(max(1, initial_size)))
         self.num_items = 0
-        self.bucket_list = [[]]
+        self.bucket_list = [[] for _ in range(self.size)]
         
     # This method returns true if it has a value for the provided key, false
     # otherwise
-    # Big O: O(1)
+    # Big O: O(1) to O(n)
     def has_key(self, key):
         hashed_key = hash(key) % self.size
         bucket = self.bucket_list[hashed_key]
@@ -52,7 +26,7 @@ class HashMap:
         return False
         
     # This method inserts a new key-value pair into the hashtable
-    # Big O: O(1), O(n^2) if resizing
+    # Big O: O(1) to O(n), O(n^2) if resizing
     def insert_val(self, key, value):
         hashed_key = hash(key) % self.size
         
@@ -72,7 +46,7 @@ class HashMap:
         self.bucket_list[hashed_key].append((key, value))
         
     # This method returns the value corresponding to the provided key
-    # Big O: O(1)
+    # Big O: O(1) to O(n)
     def get_val(self, key):
         hashed_key = hash(key) % self.size
         bucket = self.bucket_list[hashed_key]
@@ -84,7 +58,7 @@ class HashMap:
         raise KeyError(f"Key '{key}' not found in HashMap")
         
     # This method deletes the key-value pair with the matching key
-    # Big O: O(1), O(n^2) if resizing
+    # Big O: O(1) to O(n), O(n^2) if resizing
     def delete_val(self, key):
         if not self.has_key(key):
             raise KeyError(f"Key '{key}' not found in HashMap")
@@ -117,27 +91,67 @@ class HashMap:
                 
         # Replace the old bucket list with the new resized one
         self.bucket_list = new_buckets
-
+   
+# The Package class represents the packages being delivered on the trucks
+class Package:
+    def __init__(self, pkg_id, address, city, state, zipcode, deadline, mass):
+        self.package_id = pkg_id
+        self.address = address
+        self.city = city
+        self.state = state
+        self.zipcode = zipcode
+        self.deadline = deadline
+        self.mass = mass
+        self.delivery_status = 0
+        self.delivery_time = None
+        
+    # This method reads the current delivery status ID (0, 1, or 2) and returns
+    # a string explaining the status
+    # Big O: O(1)
+    def get_status(self):
+        if self.delivery_status == 0:
+            return "At the hub"
+        
+        if self.delivery_status == 1:
+            return "En route"
+            
+        if self.delivery_status == 2:
+            return f"Delivered at {float_time(self.delivery_time)}"
+         
+# This class represents the route that will be taken by one of the trucks.
+# It features a list of packages to deliver, as well as the distances
+# between each package
+class DeliveryRoute:
+    def __init__(self, package_order, distance_list):
+        self.package_order = package_order
+        self.distance_list = distance_list
+     
+# This class represents the trucks that are carrying the packages.
+# It has a DeliveryRoute that it follows and has a method to deliver
+# the packages and record when each package was delivered
 class Truck:
-    def __init__(self, route, departure_time, num_hours):
+    def __init__(self, route, departure_time):
         self.route = route
         self.departure_time = departure_time
-        self.num_hours = num_hours
         self.speed = 18
         
-    def run_simulation(self, package_map):
+    # This method simulates a delivery run of all the packages on the route.
+    # It delivers the packages in the order determined by calculate_delivery_route().
+    # Big O: O(n)
+    def deliver_packages(self, package_map, hours_passed):
         route_length = sum(self.route.distance_list)
         
         if self.departure_time is not None:
-            distance_traveled = max(0, min(route_length, self.speed*(self.num_hours - self.departure_time)))
+            distance_traveled = max(0, min(route_length, self.speed*(hours_passed - self.departure_time)))
             distance_traveled = round(distance_traveled, 1)
-            time_ended = min(route_length/self.speed, self.num_hours)
+            time_ended = min(route_length/self.speed, hours_passed)
         
         else:
             distance_traveled = 0
             time_ended = 0
         
         miles_necessary = 0
+        total_delivered = 0
         for index, pkg_id in enumerate(self.route.package_order):
             miles_necessary += self.route.distance_list[index]
             the_package = package_map.get_val(pkg_id)
@@ -150,62 +164,102 @@ class Truck:
                 
             else:
                 the_package.delivery_status = 2
-                the_package.delivery_time = miles_necessary/self.speed + self.departure_time                
+                the_package.delivery_time = miles_necessary/self.speed + self.departure_time     
+                total_delivered += 1           
         
         if distance_traveled < route_length:
             was_route_completed = False
         else:
             was_route_completed = True
         
-        total_delivered = 0
-        for pkg_id in self.route.package_order:
-            the_package = package_map.get_val(pkg_id)
-            if the_package.delivery_status == 2:
-                total_delivered += 1
-        
-        return SimulationResult(distance_traveled, time_ended, was_route_completed, total_delivered)
+        return DeliveryResult(distance_traveled, route_length, time_ended, was_route_completed, total_delivered)
      
-class DeliveryRoute:
-    def __init__(self, package_order, distance_list):
-        self.package_order = package_order
-        self.distance_list = distance_list
-     
-class SimulationResult:
-    def __init__(self, distance_traveled, time_ended, was_route_completed, total_delivered):
+# This class represents the result of the Truck.deliver_packages() method.
+# It details how the delivery went, including time spent, distance traveled, and
+# number of packages delivered
+class DeliveryResult:
+    def __init__(self, distance_traveled, route_length, time_ended, was_route_completed, total_delivered):
         self.distance_traveled = distance_traveled
+        self.route_length = route_length
         self.time_ended = time_ended
         self.was_route_completed = was_route_completed
         self.total_delivered = total_delivered
     
+# This class represents the result of the entire simulation. It stores the 
+# results of each truck's delivery route so the information can be given
+# to the user
+class SimulationResult:
+    def __init__(self, package_list, result_list):
+        self.package_list = package_list
+        self.result_list = result_list
+        
+    # This method returns the total number of packages that were delivered
+    # Big O: O(n)
+    def get_pkgs_delivered(self):
+        return sum([result.total_delivered for result in self.result_list])
+        
+    # This method returns the total number of packages on the trucks
+    # Big O: O(1)
+    def get_pkgs_total(self):
+        return len(self.package_list)
+        
+    # This method returns the total number of miles traveled by all the trucks
+    # Big O: O(n)
+    def get_miles_traveled(self):
+        return round(sum([result.distance_traveled for result in self.result_list]), 1)
+        
+    # This method returns the total number of miles necessary for all trucks to 
+    # complete their route and return to the hub
+    # Big O: O(n)
+    def get_miles_required(self):
+        return round(sum([result.route_length for result in self.result_list]), 1)
+        
+    # This method returns the total amount of time that was spent delivering packages
+    # Big O: O(n)
+    def get_time_spent(self):
+        return round(max([result.time_ended for result in self.result_list]), 2)
+        
+# This function takes a number of hours past 8am and returns a string
+# formatted in the standard HH:MM AM/PM format
+# Big O: O(1)
 def float_time(float_time):
-    # This method 
     hours = 8 + math.floor(float_time)
     minutes = int((float_time % 1)*60)
     
     h24_string = datetime.datetime.strptime(f"{hours}:{minutes}", "%H:%M")
     h12_string = h24_string.strftime("%I:%M%p")
     return h12_string
-                    
+    
+# This function loads the distances.csv file as a list of lists so it can be
+# used to the create the distance map
+# Big O: O(n)  
 def load_distance_data():
     distances_path = "distances.csv"
 
     with open(distances_path) as f:
         return [x for x in csv.reader(f)]
 
+# This function loads the packages.csv file as a list of lists so it can be used
+# to create the package map
+# Big O: O(n)
 def load_package_data():
     packages_path = "packages.csv"
 
     with open(packages_path) as f:
         return [x for x in csv.reader(f)][1:]
     
+# This function reads the data pulled from the distances.csv file and uses it to
+# create a table that can be used to quickly find the distance between any two addresses
+# Big O: O(n^2)
 def create_distance_hashmap(distance_data):
-    distance_map = HashMap()
+    map_size = len(distance_data[0])
+    distance_map = HashMap(map_size)
     
     for address in distance_data[0]:
         if not address:
             continue
         
-        distance_map.insert_val(address, HashMap())
+        distance_map.insert_val(address, HashMap(map_size))
     
     for index, point_a in enumerate(distance_data[0]):
         if not point_a:
@@ -222,9 +276,13 @@ def create_distance_hashmap(distance_data):
             distance_map.get_val(point_b).insert_val(point_a, distance)
     
     return distance_map
-            
+           
+# This function reads the data pulled from the packages.csv file and parses it
+# into a hashmap of package objects
+# Big O: O(n)
 def create_package_hashmap(package_data):
-    package_map = HashMap()
+    map_size = len(package_data)
+    package_map = HashMap(map_size)
     
     for values in package_data:
         key = int(values[0])
@@ -233,7 +291,12 @@ def create_package_hashmap(package_data):
         
     return package_map
     
-def greedy_algorithm(package_map, distance_map, package_list):
+# This function uses a greedy algorithm to determine a good order
+# to deliver a given list of packages in. At every step, it simply
+# choses the closest package to the current address, prioritizing packages
+# that have a delivery deadline.
+# Big O: O(n^2)
+def calculate_delivery_route(package_map, distance_map, package_list):
     path_taken = []
     distances = []
     
@@ -307,53 +370,36 @@ def get_distance_from_hub(package_map, distance_map, pkg):
     address = package_map.get_val(pkg).address
     return get_address_distance(distance_map, "HUB", address)
     
-def simulate_deliveries(package_map, distance_map, num_hours, chosen_pkg):
+def simulate_deliveries(package_map, distance_map, hours_passed):
     packages_a = [1, 8, 12, 13, 14, 15, 16, 19, 20, 21, 29, 30, 31, 34, 40]
     packages_b = [3, 4, 6, 11, 17, 18, 22, 23, 24, 25, 26, 32, 36, 37, 38]
     packages_c = [2, 5, 7, 9, 10, 27, 28, 33, 35, 39]
     
     all_packages = sorted(packages_a + packages_b + packages_c)
     
-    truck_a = Truck(greedy_algorithm(package_map, distance_map, packages_a), 0, num_hours)
-    simulation_a = truck_a.run_simulation(package_map)
+    truck_a = Truck(calculate_delivery_route(package_map, distance_map, packages_a), 0)
+    results_a = truck_a.deliver_packages(package_map, hours_passed)
     
-    truck_b = Truck(greedy_algorithm(package_map, distance_map, packages_b), 1 + 5/60, num_hours)
-    simulation_b = truck_b.run_simulation(package_map)
+    truck_b = Truck(calculate_delivery_route(package_map, distance_map, packages_b), 1 + 5/60)
+    results_b = truck_b.deliver_packages(package_map, hours_passed)
     
     truck_c_departure_time = None
-    if simulation_a.was_route_completed and simulation_b.was_route_completed:
-        if simulation_a.time_ended < simulation_b.time_ended: 
-            truck_c_departure_time = simulation_a.time_ended
+    if results_a.was_route_completed and results_b.was_route_completed:
+        if results_a.time_ended < results_b.time_ended: 
+            truck_c_departure_time = results_a.time_ended
         else:
-            truck_c_departure_time = simulation_b.time_ended
+            truck_c_departure_time = results_b.time_ended
     
-    elif simulation_a.was_route_completed:
-        truck_c_departure_time = simulation_a.time_ended
+    elif results_a.was_route_completed:
+        truck_c_departure_time = results_a.time_ended
         
-    elif simulation_b.was_route_completed:
-        truck_c_departure_time = simulation_b.time_ended
+    elif results_b.was_route_completed:
+        truck_c_departure_time = results_b.time_ended
         
-    truck_c = Truck(greedy_algorithm(package_map, distance_map, packages_c), truck_c_departure_time, num_hours)
-    simulation_c = truck_c.run_simulation(package_map)
+    truck_c = Truck(calculate_delivery_route(package_map, distance_map, packages_c), truck_c_departure_time)
+    results_c = truck_c.deliver_packages(package_map, hours_passed)
     
-    total_delivered = 0
-    for truck in [simulation_a, simulation_b, simulation_c]:
-        total_delivered += truck.total_delivered
-        
-    total_traveled = round(simulation_a.distance_traveled + simulation_b.distance_traveled + simulation_c.distance_traveled, 1)
-    total_required = round(sum(truck_a.route.distance_list) + sum(truck_b.route.distance_list) + sum(truck_c.route.distance_list), 1)
-    total_time = round(max(simulation_a.time_ended, simulation_b.time_ended, simulation_c.time_ended), 2)
-    
-    if chosen_pkg is not None:
-        the_package = package_map.get_val(chosen_pkg)
-        print(f"Package #{chosen_pkg}: {the_package.get_status()}")
-        
-    else:
-        for pkg_id in all_packages:
-            the_package = package_map.get_val(pkg_id)
-            print(f"Package #{pkg_id}: {the_package.get_status()}")
-            
-    print(f"Overview at {float_time(num_hours)}: {total_delivered} out of {len(all_packages)} packages delivered, {total_traveled} out of {total_required} miles traveled")
+    return SimulationResult(all_packages, [results_a, results_b, results_c])            
     
 def get_simulation_input():
     package_list = [x for x in range(1, 41)]
@@ -398,6 +444,18 @@ def get_simulation_input():
             
             return max(0, hours_passed), chosen_pkg
 
+def print_simulation_results(package_map, hours_passed, chosen_pkg, results):
+    print(f"Overview at {float_time(hours_passed)}: {results.get_pkgs_delivered()} out of {results.get_pkgs_total()} packages delivered, {results.get_miles_traveled()} out of {results.get_miles_required()} miles traveled")
+    
+    if chosen_pkg is not None:
+        the_package = package_map.get_val(chosen_pkg)
+        print(f"Package #{chosen_pkg}: {the_package.get_status()}")
+        
+    else:
+        for pkg_id in results.package_list:
+            the_package = package_map.get_val(pkg_id)
+            print(f"Package #{pkg_id}: {the_package.get_status()}")
+    
 def main():
     distance_data = load_distance_data()
     distance_map = create_distance_hashmap(distance_data)
@@ -407,7 +465,8 @@ def main():
     
     while True:
         hours_passed, chosen_pkg = get_simulation_input()
-        simulate_deliveries(package_map, distance_map, hours_passed, chosen_pkg)
+        results = simulate_deliveries(package_map, distance_map, hours_passed)
+        print_simulation_results(package_map, hours_passed, chosen_pkg, results)
         print("-"*25)
-    
+        
 main()
