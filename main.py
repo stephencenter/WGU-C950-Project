@@ -8,6 +8,8 @@ import math
 # distances between addresses
 class HashMap:
     def __init__(self, initial_size):
+        # An initial size for the HashMap is set so we don't have to
+        # continually resize as we populate the map
         self.size = 2**math.ceil(math.log2(max(1, initial_size)))
         self.num_items = 0
         self.bucket_list = [[] for _ in range(self.size)]
@@ -104,6 +106,7 @@ class Package:
         self.mass = mass
         self.delivery_status = 0
         self.delivery_time = None
+        self.carrier = None
         
     # This method reads the current delivery status ID (0, 1, or 2) and returns
     # a string explaining the status
@@ -113,38 +116,24 @@ class Package:
             return "At the hub"
         
         if self.delivery_status == 1:
-            return "En route"
+            return f"En route on {self.carrier}"
             
         if self.delivery_status == 2:
-            return f"Delivered at {float_time(self.delivery_time)}"
-         
-# This class represents the route that will be taken by one of the trucks.
-# It features a list of packages to deliver, as well as the distances
-# between each package
-class DeliveryRoute:
-    def __init__(self, package_order, distance_list):
-        self.package_order = package_order
-        self.distance_list = distance_list
-     
-# This class represents the trucks that are carrying the packages.
-# It has a DeliveryRoute that it follows and has a method to deliver
-# the packages and record when each package was delivered
-class Truck:
-    def __init__(self, route, departure_time):
-        self.route = route
-        self.departure_time = departure_time
-        self.speed = 18
+            return f"Delivered at {float_time(self.delivery_time)} by {self.carrier}"
+              
+class Simulator:
+    def __init__(self):
+        pass
         
-    # This method simulates a delivery run of all the packages on the route.
-    # It delivers the packages in the order determined by calculate_delivery_route().
-    # Big O: O(n)
-    def deliver_packages(self, package_map, hours_passed):
-        route_length = sum(self.route.distance_list)
+    def simulate_delivery(self, truck_name, package_map, distance_map, package_list, departure_time, hours_passed):
+        pkg_route, distance_list = self.calculate_delivery_route(package_map, distance_map, package_list)
+        route_length = sum(distance_list)
+        speed = 18
         
-        if self.departure_time is not None:
-            distance_traveled = max(0, min(route_length, self.speed*(hours_passed - self.departure_time)))
-            distance_traveled = round(distance_traveled, 1)
-            time_ended = min(route_length/self.speed, hours_passed)
+        if departure_time is not None:
+            distance_traveled = max(0, min(route_length, speed*(hours_passed - departure_time)))
+            time_ended = distance_traveled/speed + departure_time
+            distance_traveled = distance_traveled
         
         else:
             distance_traveled = 0
@@ -152,8 +141,8 @@ class Truck:
         
         miles_necessary = 0
         total_delivered = 0
-        for index, pkg_id in enumerate(self.route.package_order):
-            miles_necessary += self.route.distance_list[index]
+        for index, pkg_id in enumerate(pkg_route):
+            miles_necessary += distance_list[index]
             the_package = package_map.get_val(pkg_id)
             
             if distance_traveled == 0:
@@ -161,72 +150,122 @@ class Truck:
                 
             elif distance_traveled < miles_necessary:
                 the_package.delivery_status = 1
+                the_package.carrier = truck_name
                 
             else:
                 the_package.delivery_status = 2
-                the_package.delivery_time = miles_necessary/self.speed + self.departure_time     
-                total_delivered += 1           
+                the_package.delivery_time = miles_necessary/speed + departure_time 
+                the_package.carrier = truck_name    
+                total_delivered += 1
         
-        if distance_traveled < route_length:
-            was_route_completed = False
-        else:
-            was_route_completed = True
+        return SimulationResult(truck_name, departure_time, hours_passed, time_ended, distance_traveled, route_length, len(package_list), total_delivered)
         
-        return DeliveryResult(distance_traveled, route_length, time_ended, was_route_completed, total_delivered)
-     
-# This class represents the result of the Truck.deliver_packages() method.
+    # This method uses a greedy algorithm to determine a good order
+    # to deliver a given list of packages in. At every step, it simply
+    # choses the closest package to the current address, prioritizing packages
+    # that have a delivery deadline
+    # Big O: O(n^2)
+    def calculate_delivery_route(self, package_map, distance_map, package_list):
+        path_taken = []
+        distances = []
+        
+        while len(path_taken) != len(package_list):
+            closest_point = None
+            closest_distance = 10000
+            
+            for pkg_id in [x for x in package_list if x not in path_taken]:
+                # Get the distance from the current point to this package
+                if path_taken:
+                    distance = get_package_distance(package_map, distance_map, path_taken[-1], pkg_id)
+                else:
+                    distance = get_distance_from_hub(package_map, distance_map, pkg_id)
+                
+                # If the distance between the current point and this package are 0,
+                # that means we can deliver it immediately with no issues
+                if distance == 0:
+                    closest_distance = distance
+                    closest_point = pkg_id
+                    break
+                
+                # This is a list of packages that need to be delivered
+                # by a specific deadline. They are prioritized over other packages            
+                delivered_by_900 = [15]
+                delivered_by_1030 = [1, 6, 13, 14, 16, 20, 25, 29, 30, 31, 34, 37, 40]
+                
+                # If the closest found package has a deadline, and this package 
+                # doesn't, then we ignore it even if it's closer
+                if closest_point in delivered_by_900 and pkg_id not in delivered_by_900:
+                    continue
+                    
+                if closest_point in delivered_by_1030 and pkg_id not in (delivered_by_1030 + delivered_by_900):
+                    continue
+                
+                # If the closest found package doesn't have a deadline, and this one
+                # does, then we give this package priority even if it's further away
+                if pkg_id in delivered_by_900 and closest_point not in delivered_by_900:
+                    closest_distance = distance
+                    closest_point = pkg_id
+                    continue
+                    
+                if pkg_id in delivered_by_1030 and closest_point not in (delivered_by_1030 + delivered_by_900):
+                    closest_distance = distance
+                    closest_point = pkg_id
+                    continue
+                
+                # If both packages have a deadline, or neither of them do, then we
+                # choose the one that's closest
+                if distance < closest_distance:                    
+                    closest_distance = distance
+                    closest_point = pkg_id
+                    
+            path_taken.append(closest_point)
+            distances.append(closest_distance)
+        
+        # Add the distance needed to travel from the final point back to the hub
+        distances.append(get_distance_from_hub(package_map, distance_map, path_taken[-1]))
+        
+        return path_taken, distances
+    
+# This class represents the result of the Simulator.simulate_delivery() method.
 # It details how the delivery went, including time spent, distance traveled, and
 # number of packages delivered
-class DeliveryResult:
-    def __init__(self, distance_traveled, route_length, time_ended, was_route_completed, total_delivered):
+class SimulationResult:
+    def __init__(self, truck_name, departure_time, hours_passed, time_ended, distance_traveled, route_length, num_packages, total_delivered):
+        self.truck_name = truck_name
+        self.departure_time = departure_time
+        self.hours_passed = hours_passed
+        self.time_ended = time_ended
         self.distance_traveled = distance_traveled
         self.route_length = route_length
-        self.time_ended = time_ended
-        self.was_route_completed = was_route_completed
+        self.num_packages = num_packages
         self.total_delivered = total_delivered
-    
-# This class represents the result of the entire simulation. It stores the 
-# results of each truck's delivery route so the information can be given
-# to the user
-class SimulationResult:
-    def __init__(self, package_list, result_list):
-        self.package_list = package_list
-        self.result_list = result_list
         
-    # This method returns the total number of packages that were delivered
-    # Big O: O(n)
-    def get_pkgs_delivered(self):
-        return sum([result.total_delivered for result in self.result_list])
+    # Returns true if the total distance traveled was enough to complete the route
+    def was_route_completed(self):
+        return self.distance_traveled >= self.route_length
         
-    # This method returns the total number of packages on the trucks
-    # Big O: O(1)
-    def get_pkgs_total(self):
-        return len(self.package_list)
-        
-    # This method returns the total number of miles traveled by all the trucks
-    # Big O: O(n)
-    def get_miles_traveled(self):
-        return round(sum([result.distance_traveled for result in self.result_list]), 1)
-        
-    # This method returns the total number of miles necessary for all trucks to 
-    # complete their route and return to the hub
-    # Big O: O(n)
-    def get_miles_required(self):
-        return round(sum([result.route_length for result in self.result_list]), 1)
-        
-    # This method returns the total amount of time that was spent delivering packages
-    # Big O: O(n)
-    def get_time_spent(self):
-        return round(max([result.time_ended for result in self.result_list]), 2)
+    # This method returns a string detailing the status of the truck at the
+    # time the simulation finished
+    def get_truck_status(self):
+        if self.departure_time is None:
+            return "Waiting for a truck to return"
+            
+        if self.hours_passed < self.departure_time:
+            return f"Ready for departure at {float_time(self.departure_time)}"
+            
+        if self.was_route_completed():
+            return f"Route completed at {float_time(self.time_ended)}"
+            
+        return "Route in progress"    
         
 # This function takes a number of hours past 8am and returns a string
 # formatted in the standard HH:MM AM/PM format
 # Big O: O(1)
 def float_time(float_time):
-    hours = 8 + math.floor(float_time)
-    minutes = int((float_time % 1)*60)
+    hours = math.floor(float_time)
+    minutes = min(math.ceil((float_time - hours)*60), 59)
     
-    h24_string = datetime.datetime.strptime(f"{hours}:{minutes}", "%H:%M")
+    h24_string = datetime.datetime.strptime(f"{hours + 8}:{minutes}", "%H:%M")
     h12_string = h24_string.strftime("%I:%M%p")
     return h12_string
     
@@ -291,115 +330,77 @@ def create_package_hashmap(package_data):
         
     return package_map
     
-# This function uses a greedy algorithm to determine a good order
-# to deliver a given list of packages in. At every step, it simply
-# choses the closest package to the current address, prioritizing packages
-# that have a delivery deadline.
-# Big O: O(n^2)
-def calculate_delivery_route(package_map, distance_map, package_list):
-    path_taken = []
-    distances = []
-    
-    while len(path_taken) != len(package_list):
-        closest_point = None
-        closest_distance = 10000
-        
-        for pkg_id in [x for x in package_list if x not in path_taken]:
-            # Get the distance from the current point to this package
-            if path_taken:
-                distance = get_package_distance(package_map, distance_map, path_taken[-1], pkg_id)
-            else:
-                distance = get_distance_from_hub(package_map, distance_map, pkg_id)
-            
-            # If the distance between the current point and this package are 0,
-            # that means we can deliver it immediately with no issues
-            if distance == 0:
-                closest_distance = distance
-                closest_point = pkg_id
-                break
-            
-            # This is a list of packages that need to be delivered
-            # by a specific deadline. They are prioritized over other packages            
-            delivered_by_900 = [15]
-            delivered_by_1030 = [1, 6, 13, 14, 16, 20, 25, 29, 30, 31, 34, 37, 40]
-            
-            # If the closest found package has a deadline, and this package 
-            # doesn't, then we ignore it even if it's closer
-            if closest_point in delivered_by_900 and pkg_id not in delivered_by_900:
-                continue
-                
-            if closest_point in delivered_by_1030 and pkg_id not in (delivered_by_1030 + delivered_by_900):
-                continue
-            
-            # If the closest found package doesn't have a deadline, and this one
-            # does, then we give this package priority even if it's further away
-            if pkg_id in delivered_by_900 and closest_point not in delivered_by_900:
-                closest_distance = distance
-                closest_point = pkg_id
-                continue
-                
-            if pkg_id in delivered_by_1030 and closest_point not in (delivered_by_1030 + delivered_by_900):
-                closest_distance = distance
-                closest_point = pkg_id
-                continue
-            
-            # If both packages have a deadline, or neither of them do, then we
-            # choose the one that's closest
-            if distance < closest_distance:                    
-                closest_distance = distance
-                closest_point = pkg_id
-                
-        path_taken.append(closest_point)
-        distances.append(closest_distance)
-    
-    # Add the distance needed to travel from the final point back to the hub
-    distances.append(get_distance_from_hub(package_map, distance_map, path_taken[-1]))
-    
-    return DeliveryRoute(path_taken, distances)
-    
+
+# This function returns the distance in miles between two addresses
+# Big O: O(1) to O(n)
 def get_address_distance(distance_map, point_a, point_b):
     val = distance_map.get_val(point_a)
     return val.get_val(point_b)
-    
+   
+# This function retrieves the destination addresses for two packages and 
+# feeds them into get_address_distance() to calculate and return the distance
+# between them
+# Big O: O(1) to O(n)
 def get_package_distance(package_map, distance_map, pkg_1, pkg_2):
     address_1 = package_map.get_val(pkg_1).address
     address_2 = package_map.get_val(pkg_2).address
     return get_address_distance(distance_map, address_1, address_2)
 
+# This function returns the distance that a given package's destination is
+# from the hub
+# Big O: O(1) to O(n)
 def get_distance_from_hub(package_map, distance_map, pkg):
     address = package_map.get_val(pkg).address
     return get_address_distance(distance_map, "HUB", address)
     
-def simulate_deliveries(package_map, distance_map, hours_passed):
+# This function runs the delivery simulation for all the trucks and records
+# the results in a SimulationResult object, which it then returns
+# Big O: O(n^2) 
+def run_simulation(package_map, distance_map, hours_passed):
+    simulator = Simulator()
+    
+    # These are our three batches of packages. They have been divided into
+    # these three groups to ensure that all packages get delivered in an
+    # efficient manner. The order of the packages in these lists does NOT
+    # matter - the route taken by the trucks is determined by an algorithm
+    # and is independent of the ordering of the list
     packages_a = [1, 8, 12, 13, 14, 15, 16, 19, 20, 21, 29, 30, 31, 34, 40]
     packages_b = [3, 4, 6, 11, 17, 18, 22, 23, 24, 25, 26, 32, 36, 37, 38]
     packages_c = [2, 5, 7, 9, 10, 27, 28, 33, 35, 39]
     
-    all_packages = sorted(packages_a + packages_b + packages_c)
+    # Run the simulation for Truck A carrying package list A.
+    # None of the packages in group A are delayed, so Truck A will leave
+    # immediately
+    results_a = simulator.simulate_delivery("Truck A", package_map, distance_map, packages_a, 0, hours_passed)
     
-    truck_a = Truck(calculate_delivery_route(package_map, distance_map, packages_a), 0)
-    results_a = truck_a.deliver_packages(package_map, hours_passed)
+    # Run the simulation for Truck B carrying package list B.
+    # Package group B has many packages that are delayed until 9:05am, so we
+    # hold Truck B until then so it can carry all its packages
+    results_b = simulator.simulate_delivery("Truck B", package_map, distance_map, packages_b, 1 + 5/60, hours_passed)
     
-    truck_b = Truck(calculate_delivery_route(package_map, distance_map, packages_b), 1 + 5/60)
-    results_b = truck_b.deliver_packages(package_map, hours_passed)
+    # We only have two drivers, so package group C will be picked up by the first
+    # truck that returns from its deliveries
+    c_departure_time = None
+    c_truck_name = "No truck"
     
-    truck_c_departure_time = None
-    if results_a.was_route_completed and results_b.was_route_completed:
-        if results_a.time_ended < results_b.time_ended: 
-            truck_c_departure_time = results_a.time_ended
+    # One of the packages in group C doesn't arrive until 10:20am, so that is
+    # the earliest we can send them off
+    c_earliest_time = 2 + 1/3
+    
+    # Set the departure time equal to the completion time of the first truck
+    # to return
+    if results_a.was_route_completed() or results_b.was_route_completed():
+        c_departure_time = max(c_earliest_time, min(results_a.time_ended, results_b.time_ended))
+        if results_a.time_ended < results_b.time_ended:
+            c_truck_name = "Truck A-2"
+            
         else:
-            truck_c_departure_time = results_b.time_ended
-    
-    elif results_a.was_route_completed:
-        truck_c_departure_time = results_a.time_ended
+            c_truck_name = "Truck B-2"
         
-    elif results_b.was_route_completed:
-        truck_c_departure_time = results_b.time_ended
-        
-    truck_c = Truck(calculate_delivery_route(package_map, distance_map, packages_c), truck_c_departure_time)
-    results_c = truck_c.deliver_packages(package_map, hours_passed)
+    # Run the simulation for Truck A or B carrying package list C
+    results_c = simulator.simulate_delivery(c_truck_name, package_map, distance_map, packages_c, c_departure_time, hours_passed)
     
-    return SimulationResult(all_packages, [results_a, results_b, results_c])            
+    return [results_a, results_b, results_c]
     
 def get_simulation_input():
     package_list = [x for x in range(1, 41)]
@@ -444,15 +445,37 @@ def get_simulation_input():
             
             return max(0, hours_passed), chosen_pkg
 
-def print_simulation_results(package_map, hours_passed, chosen_pkg, results):
-    print(f"Overview at {float_time(hours_passed)}: {results.get_pkgs_delivered()} out of {results.get_pkgs_total()} packages delivered, {results.get_miles_traveled()} out of {results.get_miles_required()} miles traveled")
+# This function displays the results of the simulation to the user
+# Big O: O(n)
+def print_simulation_results(package_map, hours_passed, chosen_pkg, simulation_list):
+    # Get the totals for all the simulation results
+    num_pkgs_delivered = sum([result.total_delivered for result in simulation_list])
+    num_pkgs_total = sum([result.num_packages for result in simulation_list])
+    num_miles_traveled = round(sum([result.distance_traveled for result in simulation_list]), 1)
+    num_miles_required = round(sum([result.route_length for result in simulation_list]), 1)
+    num_hours_spent = round(max([result.time_ended for result in simulation_list]), 2)
     
+    # Print an overview of the simulations
+    print(f"Overview at {float_time(hours_passed)}: {num_pkgs_delivered} out of {num_pkgs_total} packages delivered, {num_miles_traveled} out of {num_miles_required} miles traveled")
+    
+    # Print the results for each individual simulation
+    for res in simulation_list:
+        name = res.truck_name
+        traveled = round(res.distance_traveled, 2)
+        r_length = round(res.route_length, 2)
+        pkg_done = res.total_delivered
+        pkg_total = res.num_packages
+        status = res.get_truck_status()
+        print(f"{name}: {pkg_done} out of {pkg_total} packages, {traveled} out of {r_length} miles, {status}")
+        
+    # If the user specified a package to view then we only display that package's status
     if chosen_pkg is not None:
         the_package = package_map.get_val(chosen_pkg)
         print(f"Package #{chosen_pkg}: {the_package.get_status()}")
         
+    # If the user didn't specify a package, then we print all package statuses
     else:
-        for pkg_id in results.package_list:
+        for pkg_id in [x for x in range(1, 41)]:
             the_package = package_map.get_val(pkg_id)
             print(f"Package #{pkg_id}: {the_package.get_status()}")
     
@@ -465,7 +488,8 @@ def main():
     
     while True:
         hours_passed, chosen_pkg = get_simulation_input()
-        results = simulate_deliveries(package_map, distance_map, hours_passed)
+        print("-"*25)
+        results = run_simulation(package_map, distance_map, hours_passed)
         print_simulation_results(package_map, hours_passed, chosen_pkg, results)
         print("-"*25)
         
