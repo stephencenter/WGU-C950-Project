@@ -9,7 +9,7 @@ import math
 class HashMap:
     def __init__(self, initial_size):
         # An initial size for the HashMap is set so we don't have to
-        # continually resize as we populate the map
+        # continually resize as we initially populate the map
         self.size = 2**math.ceil(math.log2(max(1, initial_size)))
         self.num_items = 0
         self.bucket_list = [[] for _ in range(self.size)]
@@ -116,48 +116,72 @@ class Package:
             return "At the hub"
         
         if self.delivery_status == 1:
-            return f"En route on {self.carrier}"
+            return f"In transit on {self.carrier}"
             
         if self.delivery_status == 2:
             return f"Delivered at {float_time(self.delivery_time)} by {self.carrier}"
-              
+   
+# The Simulator class is used to simulate our trucks on their deliveries and
+# record all the information
 class Simulator:
     def __init__(self):
         pass
-        
+    
+    # This method takes a list of delivery parameters including a list of packages,
+    # a number of hours passed, and a departure time, and simulates a delivery
+    # with those parameters. It then returns a SimulationResult object that
+    # details the outcome of the simulation
+    # Big O: O(n^2)
     def simulate_delivery(self, truck_name, package_map, distance_map, package_list, departure_time, hours_passed):
+        # First we evaluate an efficient order to deliver the packages in
         pkg_route, distance_list = self.calculate_delivery_route(package_map, distance_map, package_list)
         route_length = sum(distance_list)
+        
+        # This is the speed of the truck in miles/hour
         speed = 18
         
+        # If a departure time was provided, the calculate the distance the truck
+        # was able to travel in the amount of time specified, as well as the
+        # time their route ended
         if departure_time is not None:
             distance_traveled = max(0, min(route_length, speed*(hours_passed - departure_time)))
             time_ended = distance_traveled/speed + departure_time
             distance_traveled = distance_traveled
         
+        # If a departure time was not provided, then the truck will not travel
+        # anywhere, and we set its distance to 0
         else:
             distance_traveled = 0
             time_ended = 0
         
-        miles_necessary = 0
+        # Evaluate the status of each package given the number of miles traveled
         total_delivered = 0
         for index, pkg_id in enumerate(pkg_route):
-            miles_necessary += distance_list[index]
             the_package = package_map.get_val(pkg_id)
             
+            # Calculate the number of miles necessary to have delivered this
+            # package
+            miles_necessary = sum(distance_list[:index + 1])
+            
+            # If distance_traveled == 0, then the package hasn't left the hub
             if distance_traveled == 0:
                 the_package.delivery_status = 0
                 
+            # If distance_travled < miles_necessary, then the package is in 
+            # transit
             elif distance_traveled < miles_necessary:
                 the_package.delivery_status = 1
                 the_package.carrier = truck_name
                 
+            # Otherwise, the package has been delivered
             else:
                 the_package.delivery_status = 2
                 the_package.delivery_time = miles_necessary/speed + departure_time 
                 the_package.carrier = truck_name    
                 total_delivered += 1
         
+        # Gather all of the information into a SimulationResult object and 
+        # return it
         return SimulationResult(truck_name, departure_time, hours_passed, time_ended, distance_traveled, route_length, len(package_list), total_delivered)
         
     # This method uses a greedy algorithm to determine a good order
@@ -169,6 +193,7 @@ class Simulator:
         path_taken = []
         distances = []
         
+        # Loop until all packages have been placed into the route
         while len(path_taken) != len(package_list):
             closest_point = None
             closest_distance = 10000
@@ -188,7 +213,7 @@ class Simulator:
                     break
                 
                 # This is a list of packages that need to be delivered
-                # by a specific deadline. They are prioritized over other packages            
+                # by a specific deadline. They are prioritized over other packages
                 delivered_by_900 = [15]
                 delivered_by_1030 = [1, 6, 13, 14, 16, 20, 25, 29, 30, 31, 34, 37, 40]
                 
@@ -240,7 +265,8 @@ class SimulationResult:
         self.num_packages = num_packages
         self.total_delivered = total_delivered
         
-    # Returns true if the total distance traveled was enough to complete the route
+    # This method returns true if the total distance traveled was enough to 
+    # complete the route, false otherwise
     def was_route_completed(self):
         return self.distance_traveled >= self.route_length
         
@@ -402,8 +428,9 @@ def run_simulation(package_map, distance_map, hours_passed):
     
     return [results_a, results_b, results_c]
     
+# This function asks the user what time they want to run the simulation at
+# and what package (if any) they want to see the status of
 def get_simulation_input():
-    package_list = [x for x in range(1, 41)]
     while True:
         print("The day starts at 8:00AM, there are 40 packages")
         print("Leave package# blank to view all packages")
@@ -419,6 +446,8 @@ def get_simulation_input():
                 print("Please provide a time to get information at")
                 continue
                 
+            # Convert the chosen time to a datetime object so we can extract
+            # the number of hours and minutes later
             try:
                 chosen_time = datetime.datetime.strptime(chosen_time, "%I:%M%p")
                 
@@ -431,18 +460,26 @@ def get_simulation_input():
                 chosen_pkg = chosen[1]
                 chosen_pkg = int(chosen_pkg)
                 
-                if chosen_pkg not in package_list:
+                if chosen_pkg not in range(1, 41):
                     raise ValueError
                 
+            # If the user didn't provide a package id then we will display
+            # all of the packages later
             except IndexError:
                 chosen_pkg = None
                 
+            # A value error will be raised if the provided id isn't an integer
+            # in the range 1 to 40
             except ValueError:
                 print("Please ensure package# is a number between 1 and 40")
                 continue
                 
+            # Convert the datetime object to a float. We take the hour value,
+            # add the minute value divded by 60, and then subtract 8. This will
+            # give us the number of hours after 8:00am this datetime is
             hours_passed = chosen_time.hour + (chosen_time.minute/60) - 8
             
+            # Return the user input
             return max(0, hours_passed), chosen_pkg
 
 # This function displays the results of the simulation to the user
@@ -479,6 +516,8 @@ def print_simulation_results(package_map, hours_passed, chosen_pkg, simulation_l
             the_package = package_map.get_val(pkg_id)
             print(f"Package #{pkg_id}: {the_package.get_status()}")
     
+# This function is our main function. It creates our distance and package
+# maps, and then it runs our main loop
 def main():
     distance_data = load_distance_data()
     distance_map = create_distance_hashmap(distance_data)
@@ -486,6 +525,9 @@ def main():
     package_data = load_package_data()
     package_map = create_package_hashmap(package_data)
     
+    # This is the main program loop. The program will continually ask the
+    # user to enter a time and package id, then it will run a simulation. 
+    # Finally, it will print the results of the simulation and restart the loop
     while True:
         hours_passed, chosen_pkg = get_simulation_input()
         print("-"*25)
@@ -493,4 +535,5 @@ def main():
         print_simulation_results(package_map, hours_passed, chosen_pkg, results)
         print("-"*25)
         
-main()
+if __name__ == "__main__":
+    main()
