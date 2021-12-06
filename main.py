@@ -119,7 +119,14 @@ class Package:
             return f"In transit on {self.carrier}"
             
         if self.delivery_status == 2:
-            return f"Delivered at {float_time(self.delivery_time)} by {self.carrier}"
+            return f"Delivered at {float_to_time(self.delivery_time, 8)} by {self.carrier}"
+            
+    # This method converts this package's deadline to a float and returns it
+    def get_deadline(self):
+        if self.deadline == "EOD":
+            return 24
+            
+        return time_to_float(self.deadline, "%I:%M %p")
    
 # The Simulator class is used to simulate our trucks on their deliveries and
 # record all the information
@@ -190,66 +197,62 @@ class Simulator:
     # that have a delivery deadline
     # Big O: O(n^2)
     def calculate_delivery_route(self, package_map, distance_map, package_list):
-        path_taken = []
-        distances = []
+        optimal_route = []
+        distance_list = []
         
         # Loop until all packages have been placed into the route
-        while len(path_taken) != len(package_list):
-            closest_point = None
-            closest_distance = 10000
+        while len(optimal_route) != len(package_list):
+            best_package = None
+            best_distance = 10000
+            best_deadline = 24
             
-            for pkg_id in [x for x in package_list if x not in path_taken]:
+            for pkg_id in package_list:
+                # Skip past packages that are already in the route
+                if pkg_id in optimal_route:
+                    continue
+                    
                 # Get the distance from the current point to this package
-                if path_taken:
-                    distance = get_package_distance(package_map, distance_map, path_taken[-1], pkg_id)
+                if optimal_route:
+                    distance = get_package_distance(package_map, distance_map, optimal_route[-1], pkg_id)
                 else:
                     distance = get_distance_from_hub(package_map, distance_map, pkg_id)
-                
+                    
                 # If the distance between the current point and this package are 0,
                 # that means we can deliver it immediately with no issues
                 if distance == 0:
-                    closest_distance = distance
-                    closest_point = pkg_id
+                    best_package = pkg_id
+                    best_distance = distance
                     break
+                    
+                # Find the current package's deadline
+                deadline = package_map.get_val(pkg_id).get_deadline()
                 
-                # This is a list of packages that need to be delivered
-                # by a specific deadline. They are prioritized over other packages
-                delivered_by_900 = [15]
-                delivered_by_1030 = [1, 6, 13, 14, 16, 20, 25, 29, 30, 31, 34, 37, 40]
-                
-                # If the closest found package has a deadline, and this package 
-                # doesn't, then we ignore it even if it's closer
-                if closest_point in delivered_by_900 and pkg_id not in delivered_by_900:
+                # If this package's deadline is later than the current
+                # closest_point's deadline, then we skip this package
+                if deadline > best_deadline:
                     continue
                     
-                if closest_point in delivered_by_1030 and pkg_id not in (delivered_by_1030 + delivered_by_900):
-                    continue
-                
-                # If the closest found package doesn't have a deadline, and this one
-                # does, then we give this package priority even if it's further away
-                if pkg_id in delivered_by_900 and closest_point not in delivered_by_900:
-                    closest_distance = distance
-                    closest_point = pkg_id
+                # If this package's deadline is earlier than the current
+                # closest_point's deadline, then we prioritze this package
+                if deadline < best_deadline:
+                    best_package = pkg_id
+                    best_distance = distance
+                    best_deadline = deadline
                     continue
                     
-                if pkg_id in delivered_by_1030 and closest_point not in (delivered_by_1030 + delivered_by_900):
-                    closest_distance = distance
-                    closest_point = pkg_id
-                    continue
-                
-                # If both packages have a deadline, or neither of them do, then we
-                # choose the one that's closest
-                if distance < closest_distance:                    
-                    closest_distance = distance
-                    closest_point = pkg_id
+                # Prioritize packages that are closer to the most recent package
+                if distance < best_distance:
+                    best_package = pkg_id
+                    best_distance = distance
+                    best_deadline = deadline
                     
-            path_taken.append(closest_point)
-            distances.append(closest_distance)
+            optimal_route.append(best_package)
+            distance_list.append(best_distance) 
         
         # Add the distance needed to travel from the final point back to the hub
-        distances.append(get_distance_from_hub(package_map, distance_map, path_taken[-1]))
+        distance_list.append(get_distance_from_hub(package_map, distance_map, optimal_route[-1]))
         
-        return path_taken, distances
+        return optimal_route, distance_list
     
 # This class represents the result of the Simulator.simulate_delivery() method.
 # It details how the delivery went, including time spent, distance traveled, and
@@ -277,23 +280,33 @@ class SimulationResult:
             return "Waiting for a truck to return"
             
         if self.hours_passed < self.departure_time:
-            return f"Ready for departure at {float_time(self.departure_time)}"
+            string_time = float_to_time(self.departure_time, 8)
+            return f"Ready for departure at {string_time}"
             
         if self.was_route_completed():
-            return f"Route completed at {float_time(self.time_ended)}"
+            string_time = float_to_time(self.time_ended, 8)
+            return f"Route completed at {string_time}"
             
         return "Route in progress"    
         
-# This function takes a number of hours past 8am and returns a string
-# formatted in the standard HH:MM AM/PM format
+# This function takes a float and a number of hours to add on and returns a 
+# string formatted in the standard HH:MMam/pm format.
+# Example: 8.5, 2 -> 10:30am
 # Big O: O(1)
-def float_time(float_time):
+def float_to_time(float_time, add_hours):
     hours = math.floor(float_time)
     minutes = min(math.ceil((float_time - hours)*60), 59)
     
-    h24_string = datetime.datetime.strptime(f"{hours + 8}:{minutes}", "%H:%M")
+    h24_string = datetime.datetime.strptime(f"{hours + add_hours}:{minutes}", "%H:%M")
     h12_string = h24_string.strftime("%I:%M%p")
     return h12_string
+    
+# This function takes a time string and a parse format and converts it to a
+# float. Example: 10:30am, "%I:%M%p" -> 10.5
+# Big O: O(1)
+def time_to_float(string_time, parse_format):
+    timestamp = datetime.datetime.strptime(string_time, parse_format)
+    return timestamp.hour + timestamp.minute/60
     
 # This function loads the distances.csv file as a list of lists so it can be
 # used to the create the distance map
@@ -449,7 +462,8 @@ def get_simulation_input():
             # Convert the chosen time to a datetime object so we can extract
             # the number of hours and minutes later
             try:
-                chosen_time = datetime.datetime.strptime(chosen_time, "%I:%M%p")
+                chosen_time = time_to_float(chosen_time, "%I:%M%p")
+                chosen_time = max(chosen_time - 8, 0)
                 
             except ValueError:
                 print("Please ensure your time is in the format 'hh:mmAM' or 'hh:mmPM'")
@@ -473,14 +487,9 @@ def get_simulation_input():
             except ValueError:
                 print("Please ensure package# is a number between 1 and 40")
                 continue
-                
-            # Convert the datetime object to a float. We take the hour value,
-            # add the minute value divded by 60, and then subtract 8. This will
-            # give us the number of hours after 8:00am this datetime is
-            hours_passed = chosen_time.hour + (chosen_time.minute/60) - 8
             
             # Return the user input
-            return max(0, hours_passed), chosen_pkg
+            return chosen_time, chosen_pkg
 
 # This function displays the results of the simulation to the user
 # Big O: O(n)
@@ -493,7 +502,7 @@ def print_simulation_results(package_map, hours_passed, chosen_pkg, simulation_l
     num_hours_spent = round(max([result.time_ended for result in simulation_list]), 2)
     
     # Print an overview of the simulations
-    print(f"Overview at {float_time(hours_passed)}: {num_pkgs_delivered} out of {num_pkgs_total} packages delivered, {num_miles_traveled} out of {num_miles_required} miles traveled")
+    print(f"Overview at {float_to_time(hours_passed, 8)}: {num_pkgs_delivered} out of {num_pkgs_total} packages delivered, {num_miles_traveled} out of {num_miles_required} miles traveled")
     
     # Print the results for each individual simulation
     for res in simulation_list:
