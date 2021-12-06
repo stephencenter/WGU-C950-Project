@@ -96,7 +96,7 @@ class HashMap:
    
 # The Package class represents the packages being delivered on the trucks
 class Package:
-    def __init__(self, pkg_id, address, city, state, zipcode, deadline, mass):
+    def __init__(self, pkg_id, address, city, state, zipcode, deadline, mass, arrival_time):
         self.package_id = pkg_id
         self.address = address
         self.city = city
@@ -104,6 +104,7 @@ class Package:
         self.zipcode = zipcode
         self.deadline = deadline
         self.mass = mass
+        self.arrival_time = arrival_time
         self.delivery_status = 0
         self.delivery_time = None
         self.carrier = None
@@ -122,11 +123,20 @@ class Package:
             return f"Delivered at {float_to_time(self.delivery_time, 8)} by {self.carrier}"
             
     # This method converts this package's deadline to a float and returns it
+    # Big O: O(1)
     def get_deadline(self):
         if self.deadline == "EOD":
             return 24
             
         return time_to_float(self.deadline, "%I:%M %p")
+        
+    # This method converts this package's arrival time to a float and returns it
+    # Big O: O(1)
+    def get_arrival_time(self):
+        if self.arrival_time == "BOD":
+            return 0
+            
+        return time_to_float(self.arrival_time, "%I:%M %p") - 8
    
 # The Simulator class is used to simulate our trucks on their deliveries and
 # record all the information
@@ -270,11 +280,13 @@ class SimulationResult:
         
     # This method returns true if the total distance traveled was enough to 
     # complete the route, false otherwise
+    # Big O: O(1)
     def was_route_completed(self):
         return self.distance_traveled >= self.route_length
         
     # This method returns a string detailing the status of the truck at the
     # time the simulation finished
+    # Big O: O(1)
     def get_truck_status(self):
         if self.departure_time is None:
             return "Waiting for a truck to return"
@@ -286,6 +298,9 @@ class SimulationResult:
         if self.was_route_completed():
             string_time = float_to_time(self.time_ended, 8)
             return f"Route completed at {string_time}"
+        
+        if self.total_delivered == self.num_packages:
+            return "Returning to hub"
             
         return "Route in progress"    
         
@@ -295,7 +310,7 @@ class SimulationResult:
 # Big O: O(1)
 def float_to_time(float_time, add_hours):
     hours = math.floor(float_time)
-    minutes = min(math.ceil((float_time - hours)*60), 59)
+    minutes = math.floor((float_time - hours)*60)
     
     h24_string = datetime.datetime.strptime(f"{hours + add_hours}:{minutes}", "%H:%M")
     h12_string = h24_string.strftime("%I:%M%p")
@@ -364,11 +379,10 @@ def create_package_hashmap(package_data):
     
     for values in package_data:
         key = int(values[0])
-        new_package = Package(key, values[1], values[2], values[3], values[4], values[5], values[6])
+        new_package = Package(key, values[1], values[2], values[3], values[4], values[5], values[6], values[7])
         package_map.insert_val(key, new_package)
         
     return package_map
-    
 
 # This function returns the distance in miles between two addresses
 # Big O: O(1) to O(n)
@@ -407,28 +421,22 @@ def run_simulation(package_map, distance_map, hours_passed):
     packages_b = [3, 4, 6, 11, 17, 18, 22, 23, 24, 25, 26, 32, 36, 37, 38]
     packages_c = [2, 5, 7, 9, 10, 27, 28, 33, 35, 39]
     
-    # Run the simulation for Truck A carrying package list A.
-    # None of the packages in group A are delayed, so Truck A will leave
-    # immediately
-    results_a = simulator.simulate_delivery("Truck A", package_map, distance_map, packages_a, 0, hours_passed)
+    # Run the simulation for Truck A carrying package list A
+    a_departure_time = max(package_map.get_val(pkg).get_arrival_time() for pkg in packages_a)
+    results_a = simulator.simulate_delivery("Truck A", package_map, distance_map, packages_a, a_departure_time, hours_passed)
     
-    # Run the simulation for Truck B carrying package list B.
-    # Package group B has many packages that are delayed until 9:05am, so we
-    # hold Truck B until then so it can carry all its packages
-    results_b = simulator.simulate_delivery("Truck B", package_map, distance_map, packages_b, 1 + 5/60, hours_passed)
+    # Run the simulation for Truck B carrying package list B
+    b_departure_time = max(package_map.get_val(pkg).get_arrival_time() for pkg in packages_b)
+    results_b = simulator.simulate_delivery("Truck B", package_map, distance_map, packages_b, b_departure_time, hours_passed)
     
     # We only have two drivers, so package group C will be picked up by the first
     # truck that returns from its deliveries
     c_departure_time = None
     c_truck_name = "No truck"
     
-    # One of the packages in group C doesn't arrive until 10:20am, so that is
-    # the earliest we can send them off
-    c_earliest_time = 2 + 1/3
-    
-    # Set the departure time equal to the completion time of the first truck
-    # to return
+    # Determine which truck will be carrying package group C
     if results_a.was_route_completed() or results_b.was_route_completed():
+        c_earliest_time = max(package_map.get_val(pkg).get_arrival_time() for pkg in packages_c)
         c_departure_time = max(c_earliest_time, min(results_a.time_ended, results_b.time_ended))
         if results_a.time_ended < results_b.time_ended:
             c_truck_name = "Truck A-2"
@@ -439,10 +447,12 @@ def run_simulation(package_map, distance_map, hours_passed):
     # Run the simulation for Truck A or B carrying package list C
     results_c = simulator.simulate_delivery(c_truck_name, package_map, distance_map, packages_c, c_departure_time, hours_passed)
     
+    # Return our results
     return [results_a, results_b, results_c]
     
 # This function asks the user what time they want to run the simulation at
 # and what package (if any) they want to see the status of
+# Big O: O(1)
 def get_simulation_input():
     while True:
         print("The day starts at 8:00AM, there are 40 packages")
@@ -502,7 +512,7 @@ def print_simulation_results(package_map, hours_passed, chosen_pkg, simulation_l
     num_hours_spent = round(max([result.time_ended for result in simulation_list]), 2)
     
     # Print an overview of the simulations
-    print(f"Overview at {float_to_time(hours_passed, 8)}: {num_pkgs_delivered} out of {num_pkgs_total} packages delivered, {num_miles_traveled} out of {num_miles_required} miles traveled")
+    print(f"Overview at {float_to_time(hours_passed, 8)}: {num_miles_traveled} out of {num_miles_required} miles traveled, {num_pkgs_delivered} out of {num_pkgs_total} packages delivered")
     
     # Print the results for each individual simulation
     for res in simulation_list:
@@ -512,7 +522,7 @@ def print_simulation_results(package_map, hours_passed, chosen_pkg, simulation_l
         pkg_done = res.total_delivered
         pkg_total = res.num_packages
         status = res.get_truck_status()
-        print(f"{name}: {pkg_done} out of {pkg_total} packages, {traveled} out of {r_length} miles, {status}")
+        print(f"{name}: {status}, {traveled} out of {r_length} miles, {pkg_done} out of {pkg_total} packages")
         
     # If the user specified a package to view then we only display that package's status
     if chosen_pkg is not None:
@@ -527,13 +537,14 @@ def print_simulation_results(package_map, hours_passed, chosen_pkg, simulation_l
     
 # This function is our main function. It creates our distance and package
 # maps, and then it runs our main loop
+# Big O: O(n^2) (this is also the Big O for our entire program)
 def main():
     distance_data = load_distance_data()
     distance_map = create_distance_hashmap(distance_data)
     
     package_data = load_package_data()
     package_map = create_package_hashmap(package_data)
-    
+
     # This is the main program loop. The program will continually ask the
     # user to enter a time and package id, then it will run a simulation. 
     # Finally, it will print the results of the simulation and restart the loop
