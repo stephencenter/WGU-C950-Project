@@ -4,18 +4,18 @@ import csv
 import datetime
 import math
 
-# The HashMap class is used to store the package objects, as well as the
+# The HashTable class is used to store the package objects, as well as the
 # distances between addresses
-class HashMap:
+class HashTable:
     def __init__(self, initial_size):
-        # An initial size for the HashMap is set so we don't have to
-        # continually resize as we initially populate the map
+        # An initial size for the HashTable is set so we don't have to
+        # continually resize as we initially populate the table
         self.size = 2**math.ceil(math.log2(max(1, initial_size)))
         self.num_items = 0
         self.bucket_list = [[] for _ in range(self.size)]
         
-    # This method returns true if it has a value for the provided key, false
-    # otherwise
+    # This method returns true if the table has a value for the provided key, 
+    # false otherwise
     # Big O: O(1) to O(n)
     def has_key(self, key):
         hashed_key = hash(key) % self.size
@@ -27,12 +27,12 @@ class HashMap:
                 
         return False
         
-    # This method inserts a new key-value pair into the hashtable
+    # This method inserts a new key-value pair into the hash table
     # Big O: O(1) to O(n), O(n^2) if resizing
     def insert_val(self, key, value):
         hashed_key = hash(key) % self.size
         
-        # If the provided key already exists in the hashmap then we'll
+        # If the provided key already exists in the hash table then we'll
         # overwrite its value with the new value
         for index, kvp in enumerate(self.bucket_list[hashed_key]):
             if kvp[0] == key:
@@ -57,13 +57,13 @@ class HashMap:
             if kvp[0] == key:
                 return kvp[1];
                 
-        raise KeyError(f"Key '{key}' not found in HashMap")
+        raise KeyError(f"Key '{key}' not found in HashTable")
         
     # This method deletes the key-value pair with the matching key
     # Big O: O(1) to O(n), O(n^2) if resizing
     def delete_val(self, key):
         if not self.has_key(key):
-            raise KeyError(f"Key '{key}' not found in HashMap")
+            raise KeyError(f"Key '{key}' not found in HashTable")
         
         hashed_key = hash(key) % self.size        
         bucket = self.bucket_list[hashed_key]
@@ -73,13 +73,13 @@ class HashMap:
         if self.num_items < self.size/2:
             self.resize()
         
-    # This method is called when it's necessary to resize the hash map.
+    # This method is called when it's necessary to resize the hash table.
     # It sets the number of buckets equal to the smallest power of 2 larger
     # than the number of items in the table
     # Big O: O(n^2)
     def resize(self):
         # Calculate the smallest power of 2 that is larger than the
-        # number of items in hashmap (e.g. 16 for 13 items, 8 for 7 items etc)
+        # number of items in the table (e.g. 16 for 13 items, 8 for 7 items etc)
         self.size = 2**math.ceil(math.log2(self.num_items))
         
         # Create a new list of buckets
@@ -120,15 +120,17 @@ class Package:
             return f"In transit on {self.carrier}"
             
         if self.delivery_status == 2:
+            if self.delivery_time > self.get_deadline():
+                return "Late!"
             return f"Delivered at {float_to_time(self.delivery_time, 8)} by {self.carrier}"
             
     # This method converts this package's deadline to a float and returns it
     # Big O: O(1)
     def get_deadline(self):
         if self.deadline == "EOD":
-            return 24
+            return 16
             
-        return time_to_float(self.deadline, "%I:%M %p")
+        return time_to_float(self.deadline, "%I:%M %p") - 8
         
     # This method converts this package's arrival time to a float and returns it
     # Big O: O(1)
@@ -149,9 +151,9 @@ class Simulator:
     # with those parameters. It then returns a SimulationResult object that
     # details the outcome of the simulation
     # Big O: O(n^2)
-    def simulate_delivery(self, truck_name, package_map, distance_map, package_list, departure_time, hours_passed):
+    def simulate_delivery(self, truck_name, package_table, distance_table, package_list, departure_time, hours_passed):
         # First we evaluate an efficient order to deliver the packages in
-        pkg_route, distance_list = self.calculate_delivery_route(package_map, distance_map, package_list)
+        pkg_route, distance_list = self.calculate_delivery_route(package_table, distance_table, package_list)
         route_length = sum(distance_list)
         
         # This is the speed of the truck in miles/hour
@@ -174,7 +176,7 @@ class Simulator:
         # Evaluate the status of each package given the number of miles traveled
         total_delivered = 0
         for index, pkg_id in enumerate(pkg_route):
-            the_package = package_map.get_val(pkg_id)
+            the_package = package_table.get_val(pkg_id)
             
             # Calculate the number of miles necessary to have delivered this
             # package
@@ -206,7 +208,7 @@ class Simulator:
     # choses the closest package to the current address, prioritizing packages
     # that have a delivery deadline
     # Big O: O(n^2)
-    def calculate_delivery_route(self, package_map, distance_map, package_list):
+    def calculate_delivery_route(self, package_table, distance_table, package_list):
         optimal_route = []
         distance_list = []
         
@@ -214,7 +216,7 @@ class Simulator:
         while len(optimal_route) != len(package_list):
             best_package = None
             best_distance = 10000
-            best_deadline = 24
+            best_deadline = 100
             
             for pkg_id in package_list:
                 # Skip past packages that are already in the route
@@ -223,9 +225,9 @@ class Simulator:
                     
                 # Get the distance from the current point to this package
                 if optimal_route:
-                    distance = get_package_distance(package_map, distance_map, optimal_route[-1], pkg_id)
+                    distance = get_package_distance(package_table, distance_table, optimal_route[-1], pkg_id)
                 else:
-                    distance = get_distance_from_hub(package_map, distance_map, pkg_id)
+                    distance = get_distance_from_hub(package_table, distance_table, pkg_id)
                     
                 # If the distance between the current point and this package are 0,
                 # that means we can deliver it immediately with no issues
@@ -235,22 +237,23 @@ class Simulator:
                     break
                     
                 # Find the current package's deadline
-                deadline = package_map.get_val(pkg_id).get_deadline()
+                deadline = package_table.get_val(pkg_id).get_deadline()
                 
                 # If this package's deadline is later than the current
-                # closest_point's deadline, then we skip this package
+                # best_package's deadline, then we skip this package
                 if deadline > best_deadline:
                     continue
                     
                 # If this package's deadline is earlier than the current
-                # closest_point's deadline, then we prioritze this package
-                if deadline < best_deadline:
+                # best_package's deadline, and the current best_package isn'table
+                # close by, then we'll prioritize this package
+                if deadline < best_deadline and best_distance > 1:
                     best_package = pkg_id
                     best_distance = distance
                     best_deadline = deadline
                     continue
                     
-                # Prioritize packages that are closer to the most recent package
+                # Prioritize packages that are closest to the most recent package
                 if distance < best_distance:
                     best_package = pkg_id
                     best_distance = distance
@@ -260,7 +263,7 @@ class Simulator:
             distance_list.append(best_distance) 
         
         # Add the distance needed to travel from the final point back to the hub
-        distance_list.append(get_distance_from_hub(package_map, distance_map, optimal_route[-1]))
+        distance_list.append(get_distance_from_hub(package_table, distance_table, optimal_route[-1]))
         
         return optimal_route, distance_list
     
@@ -324,7 +327,7 @@ def time_to_float(string_time, parse_format):
     return timestamp.hour + timestamp.minute/60
     
 # This function loads the distances.csv file as a list of lists so it can be
-# used to the create the distance map
+# used to the create the distance table
 # Big O: O(n)  
 def load_distance_data():
     distances_path = "distances.csv"
@@ -333,7 +336,7 @@ def load_distance_data():
         return [x for x in csv.reader(f)]
 
 # This function loads the packages.csv file as a list of lists so it can be used
-# to create the package map
+# to create the package table
 # Big O: O(n)
 def load_package_data():
     packages_path = "packages.csv"
@@ -344,72 +347,88 @@ def load_package_data():
 # This function reads the data pulled from the distances.csv file and uses it to
 # create a table that can be used to quickly find the distance between any two addresses
 # Big O: O(n^2)
-def create_distance_hashmap(distance_data):
-    map_size = len(distance_data[0])
-    distance_map = HashMap(map_size)
+def create_distance_hashtable(distance_data):
+    # Create a table with an initial size equal to the number of
+    # columns in our csv file
+    table_size = len(distance_data[0])
+    distance_table = HashTable(table_size)
     
+    # Iterate through the top cell in each column in our csv file (A1, B1, etc).
+    # For each of these cells, we check its value. If its value is empty, we
+    # ignore it. If it isn't, then we add the value as a key to the distance
+    # table. The key will have its corresponding value set to another empty
+    # hash table    
     for address in distance_data[0]:
         if not address:
             continue
         
-        distance_map.insert_val(address, HashMap(map_size))
+        distance_table.insert_val(address, HashTable(table_size))
     
-    for index, point_a in enumerate(distance_data[0]):
-        if not point_a:
-            continue
+    # Iterate through each column in the csv file. The value at the top of the
+    # column is our Point A
+    for x, point_a in enumerate(distance_data[0]):
             
-        for row in distance_data:
-            point_b = row[0]
-            
-            if not point_b or not row[index]:
+        # Iterate through each row in the csv file. The value in the first cell
+        # of our row is our Point B
+        for y, point_b in enumerate(row[0] for row in distance_data):
+                
+            # The value in the cell where point_a and point_b line up is the
+            # distance between these two points
+            try:
+                distance = float(distance_data[x][y])
+            except ValueError:
                 continue
                 
-            distance = float(row[index])
-            distance_map.get_val(point_a).insert_val(point_b, distance)                
-            distance_map.get_val(point_b).insert_val(point_a, distance)
+            # Add the distance from Point A to Point B to the table.
+            # The distance from A to B and B to A are identical, but only A to B
+            # is actually listed in the csv file. So we will fill out both
+            # directions now
+            distance_table.get_val(point_a).insert_val(point_b, distance)                
+            distance_table.get_val(point_b).insert_val(point_a, distance)
     
-    return distance_map
+    # Return the table of distances we've created
+    return distance_table
            
 # This function reads the data pulled from the packages.csv file and parses it
-# into a hashmap of package objects
+# into a hash table of package objects
 # Big O: O(n)
-def create_package_hashmap(package_data):
-    map_size = len(package_data)
-    package_map = HashMap(map_size)
+def create_package_hashtable(package_data):
+    table_size = len(package_data)
+    package_table = HashTable(table_size)
     
     for values in package_data:
         key = int(values[0])
         new_package = Package(key, values[1], values[2], values[3], values[4], values[5], values[6], values[7])
-        package_map.insert_val(key, new_package)
+        package_table.insert_val(key, new_package)
         
-    return package_map
+    return package_table
 
 # This function returns the distance in miles between two addresses
 # Big O: O(1) to O(n)
-def get_address_distance(distance_map, point_a, point_b):
-    val = distance_map.get_val(point_a)
+def get_address_distance(distance_table, point_a, point_b):
+    val = distance_table.get_val(point_a)
     return val.get_val(point_b)
    
 # This function retrieves the destination addresses for two packages and 
 # feeds them into get_address_distance() to calculate and return the distance
 # between them
 # Big O: O(1) to O(n)
-def get_package_distance(package_map, distance_map, pkg_1, pkg_2):
-    address_1 = package_map.get_val(pkg_1).address
-    address_2 = package_map.get_val(pkg_2).address
-    return get_address_distance(distance_map, address_1, address_2)
+def get_package_distance(package_table, distance_table, pkg_1, pkg_2):
+    address_1 = package_table.get_val(pkg_1).address
+    address_2 = package_table.get_val(pkg_2).address
+    return get_address_distance(distance_table, address_1, address_2)
 
 # This function returns the distance that a given package's destination is
 # from the hub
 # Big O: O(1) to O(n)
-def get_distance_from_hub(package_map, distance_map, pkg):
-    address = package_map.get_val(pkg).address
-    return get_address_distance(distance_map, "HUB", address)
+def get_distance_from_hub(package_table, distance_table, pkg):
+    address = package_table.get_val(pkg).address
+    return get_address_distance(distance_table, "HUB", address)
     
 # This function runs the delivery simulation for all the trucks and records
 # the results in a SimulationResult object, which it then returns
 # Big O: O(n^2) 
-def run_simulation(package_map, distance_map, hours_passed):
+def run_simulation(package_table, distance_table, hours_passed):
     simulator = Simulator()
     
     # These are our three batches of packages. They have been divided into
@@ -417,17 +436,17 @@ def run_simulation(package_map, distance_map, hours_passed):
     # efficient manner. The order of the packages in these lists does NOT
     # matter - the route taken by the trucks is determined by an algorithm
     # and is independent of the ordering of the list
-    packages_a = [1, 8, 12, 13, 14, 15, 16, 19, 20, 21, 29, 30, 31, 34, 40]
-    packages_b = [3, 4, 6, 11, 17, 18, 22, 23, 24, 25, 26, 32, 36, 37, 38]
-    packages_c = [2, 5, 7, 9, 10, 27, 28, 33, 35, 39]
+    packages_a = [3, 7, 8, 12, 13, 14, 15, 16, 19, 21, 29, 30, 34, 37]
+    packages_b = [2, 5, 9, 10, 11, 17, 18, 23, 24, 27, 32, 33, 35, 36, 38, 39]
+    packages_c = [1, 4, 6, 20, 22, 25, 26, 28, 31, 40]
     
     # Run the simulation for Truck A carrying package list A
-    a_departure_time = max(package_map.get_val(pkg).get_arrival_time() for pkg in packages_a)
-    results_a = simulator.simulate_delivery("Truck A", package_map, distance_map, packages_a, a_departure_time, hours_passed)
+    a_departure_time = max(package_table.get_val(pkg).get_arrival_time() for pkg in packages_a)
+    results_a = simulator.simulate_delivery("Truck A", package_table, distance_table, packages_a, a_departure_time, hours_passed)
     
     # Run the simulation for Truck B carrying package list B
-    b_departure_time = max(package_map.get_val(pkg).get_arrival_time() for pkg in packages_b)
-    results_b = simulator.simulate_delivery("Truck B", package_map, distance_map, packages_b, b_departure_time, hours_passed)
+    b_departure_time = max(package_table.get_val(pkg).get_arrival_time() for pkg in packages_b)
+    results_b = simulator.simulate_delivery("Truck B", package_table, distance_table, packages_b, b_departure_time, hours_passed)
     
     # We only have two drivers, so package group C will be picked up by the first
     # truck that returns from its deliveries
@@ -436,7 +455,7 @@ def run_simulation(package_map, distance_map, hours_passed):
     
     # Determine which truck will be carrying package group C
     if results_a.was_route_completed() or results_b.was_route_completed():
-        c_earliest_time = max(package_map.get_val(pkg).get_arrival_time() for pkg in packages_c)
+        c_earliest_time = max(package_table.get_val(pkg).get_arrival_time() for pkg in packages_c)
         c_departure_time = max(c_earliest_time, min(results_a.time_ended, results_b.time_ended))
         if results_a.time_ended < results_b.time_ended:
             c_truck_name = "Truck A-2"
@@ -445,7 +464,7 @@ def run_simulation(package_map, distance_map, hours_passed):
             c_truck_name = "Truck B-2"
         
     # Run the simulation for Truck A or B carrying package list C
-    results_c = simulator.simulate_delivery(c_truck_name, package_map, distance_map, packages_c, c_departure_time, hours_passed)
+    results_c = simulator.simulate_delivery(c_truck_name, package_table, distance_table, packages_c, c_departure_time, hours_passed)
     
     # Return our results
     return [results_a, results_b, results_c]
@@ -503,7 +522,7 @@ def get_simulation_input():
 
 # This function displays the results of the simulation to the user
 # Big O: O(n)
-def print_simulation_results(package_map, hours_passed, chosen_pkg, simulation_list):
+def print_simulation_results(package_table, hours_passed, chosen_pkg, simulation_list):
     # Get the totals for all the simulation results
     num_pkgs_delivered = sum([result.total_delivered for result in simulation_list])
     num_pkgs_total = sum([result.num_packages for result in simulation_list])
@@ -526,24 +545,24 @@ def print_simulation_results(package_map, hours_passed, chosen_pkg, simulation_l
         
     # If the user specified a package to view then we only display that package's status
     if chosen_pkg is not None:
-        the_package = package_map.get_val(chosen_pkg)
+        the_package = package_table.get_val(chosen_pkg)
         print(f"Package #{chosen_pkg}: {the_package.get_status()}")
         
     # If the user didn't specify a package, then we print all package statuses
     else:
         for pkg_id in [x for x in range(1, 41)]:
-            the_package = package_map.get_val(pkg_id)
+            the_package = package_table.get_val(pkg_id)
             print(f"Package #{pkg_id}: {the_package.get_status()}")
     
 # This function is our main function. It creates our distance and package
-# maps, and then it runs our main loop
+# tables, and then it runs our main loop
 # Big O: O(n^2) (this is also the Big O for our entire program)
 def main():
     distance_data = load_distance_data()
-    distance_map = create_distance_hashmap(distance_data)
+    distance_table = create_distance_hashtable(distance_data)
     
     package_data = load_package_data()
-    package_map = create_package_hashmap(package_data)
+    package_table = create_package_hashtable(package_data)
 
     # This is the main program loop. The program will continually ask the
     # user to enter a time and package id, then it will run a simulation. 
@@ -551,8 +570,8 @@ def main():
     while True:
         hours_passed, chosen_pkg = get_simulation_input()
         print("-"*25)
-        results = run_simulation(package_map, distance_map, hours_passed)
-        print_simulation_results(package_map, hours_passed, chosen_pkg, results)
+        results = run_simulation(package_table, distance_table, hours_passed)
+        print_simulation_results(package_table, hours_passed, chosen_pkg, results)
         print("-"*25)
         
 if __name__ == "__main__":
